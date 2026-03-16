@@ -9,12 +9,15 @@
  */
 import { test as setup } from '@playwright/test'
 import { encode } from 'next-auth/jwt'
+import { PrismaClient } from '@prisma/client'
 import fs from 'fs'
 import path from 'path'
 import dotenv from 'dotenv'
 
 // Load secrets from .env.local
 dotenv.config({ path: path.resolve(__dirname, '../.env.local') })
+
+const prisma = new PrismaClient()
 
 const RESIDENT_USER = {
   sub: 'cmmtldtk5000cy71zvzb24omk',
@@ -74,6 +77,20 @@ setup('create resident session', async ({ request }) => {
 
   const authDir = path.resolve(__dirname, '.auth')
   if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true })
+
+  // Ensure the E2E super admin user exists in the DB so API writes don't fail FK constraints
+  await prisma.user.upsert({
+    where: { id: SUPER_ADMIN_USER.id },
+    update: { role: 'SUPER_ADMIN', isActive: true },
+    create: {
+      id: SUPER_ADMIN_USER.id,
+      email: SUPER_ADMIN_USER.email,
+      name: SUPER_ADMIN_USER.name,
+      role: 'SUPER_ADMIN',
+      isActive: true,
+    },
+  })
+  await prisma.$disconnect()
 
   const residentToken = await createSession(secret, RESIDENT_USER, 'resident.json', authDir)
   const adminToken = await createSession(secret, SUPER_ADMIN_USER, 'super_admin.json', authDir)

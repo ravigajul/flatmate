@@ -54,6 +54,26 @@ export async function GET(
   return NextResponse.json(issue)
 }
 
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth()
+  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (session.user.role !== 'PRESIDENT' && session.user.role !== 'SUPER_ADMIN') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const { id } = await params
+
+  const issue = await prisma.issue.findUnique({ where: { id } })
+  if (!issue) return NextResponse.json({ error: 'Issue not found' }, { status: 404 })
+
+  // IssueComment rows cascade automatically (onDelete: Cascade in schema)
+  await prisma.issue.delete({ where: { id } })
+  return NextResponse.json({ success: true })
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }

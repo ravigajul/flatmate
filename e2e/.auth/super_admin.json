@@ -1,0 +1,15 @@
+{
+  "cookies": [
+    {
+      "name": "authjs.session-token",
+      "value": "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2Q0JDLUhTNTEyIiwia2lkIjoiekthc1J5LWVzcVBtZHJ1Um14dC1aZmdzS0h6U3BrY2dKWTJmcHF4ODNCMnBNUm5oUmxXTXZyckM2czJYVXVEeFlleUZnQVhaNDFiUkdNXzhUSWhadUEifQ..tOnUbsrZ6WlGjsobExfVYA.cgvZi_bwF_5E3zy5OHXQYoNTJ-gr45IAwzbSLMuqajoO_hclTBk1J4A18yqQHlEHOFyyoy-SCVJo0ZTYtGB38o08Oa77dulh-6Z4lPwXYJ3HBWEp0qf_v6FC1O3dj2LQWnP4gp8-KvtvTgyFDbc0Z-EAxqRjT0Rrz1y-p1lJU0rlczFfNBYloF7Vo5RiYvy6PxHdWixnZv4BoaXTZciZh1aokOXCvz7gW5ICd0cJVKomas5NbDxX3SZpRmfBEIxnZpADffkpOv9sQCvNli0Z0L25RwuOI2fGxiSV1kz23LBINDyyPyRiRgB1w9V3sgsKD1RMXO1h71_Vm_uH7IFz1A.qnPBjhvN2iGTnTMo2W17ei212kJKiKaCkxI-riE2M_8",
+      "domain": "localhost",
+      "path": "/",
+      "httpOnly": true,
+      "secure": false,
+      "sameSite": "Lax",
+      "expires": 1776294633
+    }
+  ],
+  "origins": []
+}

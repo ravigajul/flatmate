@@ -3,6 +3,35 @@ import { prisma } from '@/lib/prisma'
 import { z } from 'zod'
 import { NextResponse } from 'next/server'
 
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth()
+  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (session.user.role !== 'PRESIDENT' && session.user.role !== 'SUPER_ADMIN') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const { id } = await params
+
+  const schedule = await prisma.feeSchedule.findUnique({
+    where: { id },
+    include: { payments: { where: { status: 'SUCCESS' }, select: { id: true } } },
+  })
+  if (!schedule) return NextResponse.json({ error: 'Fee schedule not found' }, { status: 404 })
+
+  if (schedule.payments.length > 0) {
+    return NextResponse.json(
+      { error: 'Cannot delete a fee schedule that has successful payments.' },
+      { status: 422 }
+    )
+  }
+
+  await prisma.feeSchedule.delete({ where: { id } })
+  return NextResponse.json({ success: true })
+}
+
 const updateFeeScheduleSchema = z.object({
   amount: z.number().positive().optional(),
   lateFee: z.number().min(0).optional(),

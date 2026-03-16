@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { ClipboardList, AlertTriangle, ArrowRight, MessageSquare } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import IssueFilters from './issue-filters'
+import IssueDeleteButton from './issue-delete-button'
 import { Suspense } from 'react'
 import type { IssueStatus, IssueCategory, IssuePriority } from '@prisma/client'
 
@@ -175,12 +176,15 @@ export default async function PresidentIssuesPage({
                       })}
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <Link
-                        href={`/president/issues/${issue.id}`}
-                        className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 text-xs font-medium"
-                      >
-                        View <ArrowRight className="w-3 h-3" />
-                      </Link>
+                      <div className="flex items-center justify-end gap-1">
+                        <Link
+                          href={`/president/issues/${issue.id}`}
+                          className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 text-xs font-medium mr-1"
+                        >
+                          View <ArrowRight className="w-3 h-3" />
+                        </Link>
+                        <IssueDeleteButton issueId={issue.id} />
+                      </div>
                     </td>
                   </tr>
                 )

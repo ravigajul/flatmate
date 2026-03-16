@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, Pencil, Building2, Users } from 'lucide-react'
+import { Plus, Pencil, Trash2, Building2, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Modal } from '@/components/ui/modal'
@@ -41,6 +41,8 @@ export default function UnitsClient({ units }: { units: Unit[] }) {
   const [form, setForm] = useState<UnitFormData>(emptyForm)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState('')
 
   function openAdd() {
     setEditing(null)
@@ -60,6 +62,22 @@ export default function UnitsClient({ units }: { units: Unit[] }) {
     })
     setError('')
     setModalOpen(true)
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      const res = await fetch(`/api/units/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json()
+        setDeleteError(data.error ?? 'Failed to delete unit')
+        return
+      }
+      setDeleteConfirmId(null)
+      setDeleteError('')
+      router.refresh()
+    } catch {
+      setDeleteError('Something went wrong')
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -163,12 +181,26 @@ export default function UnitsClient({ units }: { units: Unit[] }) {
                     </Badge>
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <button
-                      onClick={() => openEdit(unit)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center justify-end gap-1">
+                      {deleteConfirmId === unit.id ? (
+                        <>
+                          <button onClick={() => handleDelete(unit.id)} className="px-2 py-1 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">Confirm</button>
+                          <button onClick={() => { setDeleteConfirmId(null); setDeleteError('') }} className="px-2 py-1 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Cancel</button>
+                        </>
+                      ) : (
+                        <>
+                          <button onClick={() => openEdit(unit)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors" title="Edit">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => { setDeleteConfirmId(unit.id); setDeleteError('') }} className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors" title="Delete">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    {deleteConfirmId === unit.id && deleteError && (
+                      <p className="text-xs text-red-600 mt-1 text-right">{deleteError}</p>
+                    )}
                   </td>
                 </tr>
               ))}
