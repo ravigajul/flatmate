@@ -1,0 +1,294 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  SUPER_ADMIN
+  PRESIDENT
+  RESIDENT
+}
+
+enum IssueStatus {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum IssuePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IssueCategory {
+  ELECTRICAL
+  PLUMBING
+  LIFT
+  COMMON_AREA
+  SECURITY
+  CLEANING
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum ExpenseCategory {
+  REPAIRS
+  UTILITIES
+  SALARIES
+  CLEANING
+  SECURITY
+  AMC
+  MISCELLANEOUS
+}
+
+enum DocumentCategory {
+  MEETING_MINUTES
+  FINANCIAL_AUDIT
+  MAINTENANCE_CONTRACT
+  INVOICE
+  OTHER
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  email         String    @unique
+  name          String?
+  emailVerified DateTime?
+  phone         String?
+  image         String?
+  role      Role     @default(RESIDENT)
+  unitId    String?
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  unit          Unit?          @relation(fields: [unitId], references: [id])
+  issues        Issue[]
+  issueComments IssueComment[]
+  announcements Announcement[]
+  documents     Document[]
+  auditLogs     AuditLog[]
+  expenses      Expense[]
+  accounts      Account[]
+  sessions      Session[]
+
+  @@index([email])
+  @@index([unitId])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Unit {
+  id         String   @id @default(cuid())
+  flatNumber String   @unique
+  block      String?
+  floor      Int
+  areaSqft   Float?
+  ownerName  String?
+  isOccupied Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  residents    User[]
+  feeSchedules FeeSchedule[]
+  payments     Payment[]
+  issues       Issue[]
+
+  @@index([flatNumber])
+}
+
+model FeeSchedule {
+  id        String   @id @default(cuid())
+  unitId    String
+  amount    Float
+  lateFee   Float    @default(0)
+  monthYear String
+  dueDate   DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  unit     Unit      @relation(fields: [unitId], references: [id])
+  payments Payment[]
+
+  @@unique([unitId, monthYear])
+  @@index([monthYear])
+}
+
+model Payment {
+  id                     String        @id @default(cuid())
+  unitId                 String
+  feeScheduleId          String
+  amount                 Float
+  lateFeeApplied         Float         @default(0)
+  status                 PaymentStatus @default(PENDING)
+  phonePeTxnId           String?       @unique
+  phonePeMerchantOrderId String        @unique
+  paymentMethod          String?
+  paidAt                 DateTime?
+  failureReason          String?
+  receiptUrl             String?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  unit        Unit        @relation(fields: [unitId], references: [id])
+  feeSchedule FeeSchedule @relation(fields: [feeScheduleId], references: [id])
+
+  @@index([unitId])
+  @@index([status])
+  @@index([phonePeTxnId])
+}
+
+model Expense {
+  id          String          @id @default(cuid())
+  amount      Float
+  category    ExpenseCategory
+  vendor      String?
+  description String
+  receiptUrl  String?
+  expenseDate DateTime
+  addedById   String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  addedBy User @relation(fields: [addedById], references: [id])
+
+  @@index([category])
+  @@index([expenseDate])
+}
+
+model Issue {
+  id          String        @id @default(cuid())
+  unitId      String
+  raisedById  String
+  title       String
+  description String
+  category    IssueCategory
+  priority    IssuePriority @default(MEDIUM)
+  status      IssueStatus   @default(OPEN)
+  assignedTo  String?
+  photoUrls   String[]
+  resolvedAt  DateTime?
+  closedAt    DateTime?
+  isEscalated Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  unit     Unit           @relation(fields: [unitId], references: [id])
+  raisedBy User           @relation(fields: [raisedById], references: [id])
+  comments IssueComment[]
+
+  @@index([status])
+  @@index([unitId])
+  @@index([category])
+}
+
+model IssueComment {
+  id        String   @id @default(cuid())
+  issueId   String
+  authorId  String
+  text      String
+  createdAt DateTime @default(now())
+
+  issue  Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  author User  @relation(fields: [authorId], references: [id])
+
+  @@index([issueId])
+}
+
+model Announcement {
+  id            String   @id @default(cuid())
+  title         String
+  body          String
+  attachmentUrl String?
+  postedById    String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  postedBy User @relation(fields: [postedById], references: [id])
+
+  @@index([createdAt])
+}
+
+model Document {
+  id           String           @id @default(cuid())
+  name         String
+  url          String
+  category     DocumentCategory
+  fileSize     Int?
+  uploadedById String
+  createdAt    DateTime         @default(now())
+
+  uploadedBy User @relation(fields: [uploadedById], references: [id])
+
+  @@index([category])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  entity    String
+  entityId  String
+  metadata  Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([action])
+  @@index([createdAt])
+}
