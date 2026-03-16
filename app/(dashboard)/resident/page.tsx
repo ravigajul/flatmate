@@ -22,7 +22,7 @@ export default async function ResidentDashboard() {
         })
       : null,
     prisma.announcement.findMany({
-      take: 5,
+      take: 3,
       orderBy: { createdAt: 'desc' },
       select: { id: true, title: true, body: true, createdAt: true },
     }),

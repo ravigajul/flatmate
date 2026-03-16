@@ -1,30 +1,66 @@
 import { auth } from '@/lib/auth'
 import { redirect } from 'next/navigation'
-import { IndianRupee, Construction } from 'lucide-react'
+import { prisma } from '@/lib/prisma'
+import FeeManager from './fee-manager'
 
-export default async function FeesPage() {
+export default async function FeesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ month?: string }>
+}) {
   const session = await auth()
   if (!session?.user) redirect('/login')
-  if (session.user.role !== 'PRESIDENT' && session.user.role !== 'SUPER_ADMIN') redirect('/resident')
+  if (session.user.role !== 'PRESIDENT' && session.user.role !== 'SUPER_ADMIN') {
+    redirect('/resident')
+  }
+
+  const { month } = await searchParams
+  const currentMonth = month ?? new Date().toISOString().slice(0, 7)
+
+  const schedules = await prisma.feeSchedule.findMany({
+    where: { monthYear: currentMonth },
+    include: {
+      unit: { select: { flatNumber: true, ownerName: true } },
+      payments: {
+        select: { id: true, status: true, paidAt: true, amount: true, phonePeTxnId: true },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+      },
+    },
+    orderBy: { unit: { flatNumber: 'asc' } },
+  })
+
+  // Compute stats
+  const totalDue = schedules.reduce((sum, s) => sum + s.amount, 0)
+  const paidSchedules = schedules.filter((s) => s.payments[0]?.status === 'SUCCESS')
+  const totalCollected = paidSchedules.reduce(
+    (sum, s) => sum + (s.payments[0]?.amount ?? 0),
+    0
+  )
+  const outstanding = totalDue - totalCollected
+  const collectionRate = totalDue > 0 ? (totalCollected / totalDue) * 100 : 0
 
   return (
     <div className="max-w-6xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-900">Fee Schedules</h1>
-        <p className="text-slate-500 text-sm mt-1">Manage monthly maintenance fee schedules</p>
-      </div>
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-card p-16 text-center">
-        <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-          <IndianRupee className="w-7 h-7 text-indigo-400" />
+      <div className="flex items-start justify-between gap-4 mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Fee Management</h1>
+          <p className="text-slate-500 text-sm mt-1">Manage monthly maintenance fee schedules and collections</p>
         </div>
-        <div className="flex items-center justify-center gap-2 mb-2">
-          <Construction className="w-4 h-4 text-amber-500" />
-          <p className="text-slate-700 font-semibold">Coming in Phase 2</p>
-        </div>
-        <p className="text-slate-400 text-sm max-w-sm mx-auto">
-          Fee schedules, PhonePe UPI payments, and receipt generation will be available in the next phase.
-        </p>
       </div>
+
+      <FeeManager
+        schedules={schedules.map((s) => ({
+          ...s,
+          dueDate: s.dueDate.toISOString(),
+          payments: s.payments.map((p) => ({
+            ...p,
+            paidAt: p.paidAt?.toISOString() ?? null,
+          })),
+        }))}
+        currentMonth={currentMonth}
+        stats={{ totalDue, totalCollected, outstanding, collectionRate }}
+      />
     </div>
   )
 }

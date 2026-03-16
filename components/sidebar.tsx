@@ -17,6 +17,7 @@ import {
   Home,
   CreditCard,
   ClipboardList,
+  FolderOpen,
   Menu,
   X,
 } from 'lucide-react'
@@ -46,6 +47,8 @@ const residentNav = [
   { href: '/resident/pay', label: 'Pay Fees', icon: CreditCard },
   { href: '/resident/issues', label: 'My Issues', icon: ClipboardList },
   { href: '/resident/announcements', label: 'Announcements', icon: Megaphone },
+  { href: '/resident/documents', label: 'Documents', icon: FolderOpen },
+  { href: '/reports', label: 'Reports', icon: FileBarChart2 },
 ]
 
 export default function Sidebar({ user }: { user: SidebarUser }) {

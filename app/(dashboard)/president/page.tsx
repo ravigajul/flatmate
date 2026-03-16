@@ -1,7 +1,7 @@
 import { auth } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
-import { Building2, Users, Wrench, IndianRupee, ArrowRight, TrendingUp } from 'lucide-react'
+import { Building2, Users, Wrench, IndianRupee, ArrowRight, TrendingUp, Megaphone, Receipt } from 'lucide-react'
 import Link from 'next/link'
 import { formatCurrency } from '@/lib/utils'
 
@@ -14,7 +14,7 @@ export default async function PresidentDashboard() {
 
   const currentMonth = new Date().toISOString().slice(0, 7)
 
-  const [totalUnits, totalResidents, openIssues, pendingUsers, collectionStats] = await Promise.all([
+  const [totalUnits, totalResidents, openIssues, pendingUsers, collectionStats, recentExpenses, latestAnnouncement] = await Promise.all([
     prisma.unit.count(),
     prisma.user.count({ where: { role: 'RESIDENT', isActive: true } }),
     prisma.issue.count({ where: { status: { in: ['OPEN', 'ASSIGNED', 'IN_PROGRESS'] } } }),
@@ -26,6 +26,15 @@ export default async function PresidentDashboard() {
       },
       _sum: { amount: true },
       _count: true,
+    }),
+    prisma.expense.findMany({
+      take: 3,
+      orderBy: { expenseDate: 'desc' },
+      select: { id: true, description: true, amount: true, expenseDate: true, category: true },
+    }),
+    prisma.announcement.findFirst({
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, title: true, createdAt: true },
     }),
   ])
 
@@ -102,6 +111,64 @@ export default async function PresidentDashboard() {
             <p className="text-sm text-slate-500 mt-0.5">{stat.label}</p>
           </Link>
         ))}
+      </div>
+
+      {/* Recent expenses + latest announcement */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        {/* Recent expenses */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-card">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <Receipt className="w-4 h-4 text-slate-400" />
+              <h2 className="font-semibold text-slate-900">Recent Expenses</h2>
+            </div>
+            <Link href="/president/expenses" className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">
+              View all
+            </Link>
+          </div>
+          {recentExpenses.length === 0 ? (
+            <div className="px-6 py-8 text-center text-slate-400 text-sm">No expenses recorded</div>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {recentExpenses.map((e) => (
+                <li key={e.id} className="px-6 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">{e.description}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {new Date(e.expenseDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </p>
+                  </div>
+                  <p className="text-sm font-semibold text-rose-600 ml-4 flex-shrink-0">
+                    {'₹' + e.amount.toLocaleString('en-IN')}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* Latest announcement */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-card">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <Megaphone className="w-4 h-4 text-slate-400" />
+              <h2 className="font-semibold text-slate-900">Latest Announcement</h2>
+            </div>
+            <Link href="/president/announcements" className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">
+              Manage
+            </Link>
+          </div>
+          {latestAnnouncement ? (
+            <div className="px-6 py-4">
+              <p className="text-sm font-medium text-slate-800">{latestAnnouncement.title}</p>
+              <p className="text-xs text-slate-400 mt-1">
+                {new Date(latestAnnouncement.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+              </p>
+            </div>
+          ) : (
+            <div className="px-6 py-8 text-center text-slate-400 text-sm">No announcements posted</div>
+          )}
+        </div>
       </div>
 
       {/* Quick actions + collection progress */}

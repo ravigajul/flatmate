@@ -1,30 +1,72 @@
 import { auth } from '@/lib/auth'
 import { redirect } from 'next/navigation'
-import { Receipt, Construction } from 'lucide-react'
+import { prisma } from '@/lib/prisma'
+import type { ExpenseCategory } from '@prisma/client'
+import ExpenseManager from './expense-manager'
 
-export default async function ExpensesPage() {
+function formatINR(amount: number) {
+  return '₹' + amount.toLocaleString('en-IN')
+}
+
+export default async function ExpensesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ category?: string; from?: string; to?: string }>
+}) {
   const session = await auth()
   if (!session?.user) redirect('/login')
-  if (session.user.role !== 'PRESIDENT' && session.user.role !== 'SUPER_ADMIN') redirect('/resident')
+  if (session.user.role !== 'PRESIDENT' && session.user.role !== 'SUPER_ADMIN') {
+    redirect('/resident')
+  }
+
+  const { category, from, to } = await searchParams
+
+  const where: Record<string, unknown> = {}
+  if (category) where.category = category as ExpenseCategory
+  if (from || to) {
+    const dateFilter: Record<string, Date> = {}
+    if (from) {
+      const d = new Date(from)
+      if (!isNaN(d.getTime())) dateFilter.gte = d
+    }
+    if (to) {
+      const d = new Date(to)
+      if (!isNaN(d.getTime())) dateFilter.lte = d
+    }
+    if (Object.keys(dateFilter).length > 0) where.expenseDate = dateFilter
+  }
+
+  const [expenses, totalAggregate] = await Promise.all([
+    prisma.expense.findMany({
+      where,
+      include: { addedBy: { select: { name: true } } },
+      orderBy: { expenseDate: 'desc' },
+    }),
+    prisma.expense.aggregate({ _sum: { amount: true } }),
+  ])
+
+  const totalSpent = totalAggregate._sum.amount ?? 0
 
   return (
     <div className="max-w-6xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-900">Expenses</h1>
-        <p className="text-slate-500 text-sm mt-1">Track apartment expenses and balance sheet</p>
-      </div>
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-card p-16 text-center">
-        <div className="w-14 h-14 bg-rose-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-          <Receipt className="w-7 h-7 text-rose-400" />
+      <div className="flex items-start justify-between gap-4 mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Expenses</h1>
+          <p className="text-slate-500 text-sm mt-1">Track apartment expenses and balance sheet</p>
         </div>
-        <div className="flex items-center justify-center gap-2 mb-2">
-          <Construction className="w-4 h-4 text-amber-500" />
-          <p className="text-slate-700 font-semibold">Coming in Phase 4</p>
+        <div className="text-right">
+          <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Total Spent</p>
+          <p className="text-2xl font-bold text-rose-600">{formatINR(totalSpent)}</p>
         </div>
-        <p className="text-slate-400 text-sm max-w-sm mx-auto">
-          Expense logging, balance sheet, and PDF report generation will be available in Phase 4.
-        </p>
       </div>
+
+      <ExpenseManager
+        expenses={expenses.map((e) => ({
+          ...e,
+          expenseDate: e.expenseDate.toISOString(),
+        }))}
+        initialFilters={{ category, from, to }}
+      />
     </div>
   )
 }

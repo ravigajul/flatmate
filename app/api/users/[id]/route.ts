@@ -14,7 +14,7 @@ const updateUserSchema = z.object({
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth()
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -33,11 +33,12 @@ export async function PATCH(
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
   }
 
-  const prevUser = await prisma.user.findUnique({ where: { id: params.id } })
+  const { id } = await params
+  const prevUser = await prisma.user.findUnique({ where: { id } })
   if (!prevUser) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
   const updated = await prisma.user.update({
-    where: { id: params.id },
+    where: { id },
     data: parsed.data,
   })
 
@@ -47,7 +48,7 @@ export async function PATCH(
       userId: session.user.id,
       action: 'ROLE_CHANGED',
       entity: 'User',
-      entityId: params.id,
+      entityId: id,
       metadata: { from: prevUser.role, to: parsed.data.role },
       ipAddress: getClientIp(request),
     })

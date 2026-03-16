@@ -1,7 +1,7 @@
 import { auth } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
-import { Megaphone } from 'lucide-react'
+import { Megaphone, Paperclip } from 'lucide-react'
 
 export default async function ResidentAnnouncementsPage() {
   const session = await auth()
@@ -9,7 +9,9 @@ export default async function ResidentAnnouncementsPage() {
 
   const announcements = await prisma.announcement.findMany({
     orderBy: { createdAt: 'desc' },
-    select: { id: true, title: true, body: true, createdAt: true },
+    include: {
+      postedBy: { select: { name: true } },
+    },
   })
 
   return (
@@ -29,18 +31,27 @@ export default async function ResidentAnnouncementsPage() {
         <div className="space-y-4">
           {announcements.map((a) => (
             <div key={a.id} className="bg-white rounded-2xl border border-slate-200 shadow-card p-6">
-              <div className="flex items-start gap-4">
-                <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center flex-shrink-0">
-                  <Megaphone className="w-4 h-4 text-indigo-500" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-slate-900">{a.title}</p>
-                  <p className="text-sm text-slate-600 mt-1 whitespace-pre-line">{a.body}</p>
-                  <p className="text-xs text-slate-400 mt-3">
-                    {new Date(a.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                  </p>
-                </div>
-              </div>
+              <p className="font-semibold text-slate-900">{a.title}</p>
+              <p className="text-xs text-slate-400 mt-1">
+                {a.postedBy.name ?? 'Management'} &middot;{' '}
+                {new Date(a.createdAt).toLocaleDateString('en-IN', {
+                  day: '2-digit',
+                  month: 'short',
+                  year: 'numeric',
+                })}
+              </p>
+              <p className="text-sm text-slate-600 mt-3 whitespace-pre-wrap">{a.body}</p>
+              {a.attachmentUrl && (
+                <a
+                  href={a.attachmentUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
+                >
+                  <Paperclip className="w-3.5 h-3.5" />
+                  Download Attachment
+                </a>
+              )}
             </div>
           ))}
         </div>

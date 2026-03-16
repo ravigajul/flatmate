@@ -14,7 +14,7 @@ const updateUnitSchema = z.object({
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth()
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -22,6 +22,7 @@ export async function PATCH(
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
+  const { id } = await params
   const body = await request.json()
   const parsed = updateUnitSchema.safeParse(body)
   if (!parsed.success) {
@@ -29,7 +30,7 @@ export async function PATCH(
   }
 
   const unit = await prisma.unit.update({
-    where: { id: params.id },
+    where: { id },
     data: parsed.data,
   })
   return NextResponse.json(unit)

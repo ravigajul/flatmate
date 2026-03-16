@@ -86,7 +86,12 @@ export default async function ResidentIssuesPage() {
                     {new Date(issue.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <ArrowRight className="w-4 h-4 text-slate-300 ml-auto" />
+                    <Link
+                      href={`/resident/issues/${issue.id}`}
+                      className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 text-xs font-medium"
+                    >
+                      View <ArrowRight className="w-3 h-3" />
+                    </Link>
                   </td>
                 </tr>
               ))}
