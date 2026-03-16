@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { createHmac } from 'crypto'
+import { createHash } from 'crypto'
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
@@ -28,62 +28,45 @@ const mockUserFindFirst = vi.mocked(prisma.user.findFirst)
 const mockAudit = vi.mocked(writeAuditLog)
 const mockSendReceiptEmail = vi.mocked(sendReceiptEmail)
 
-const WEBHOOK_SECRET = 'test-webhook-secret-123'
+const MERCHANT_KEY = 'test-merchant-key'
+const KEY_INDEX = '1'
 
-function makeWebhookRequest(
-  body: unknown,
-  options: { useAuthHeader?: boolean; useSigHeader?: boolean; badSecret?: boolean } = {}
-): Request {
-  const rawBody = JSON.stringify(body)
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  }
+function makeBase64Response(data: object) {
+  return Buffer.from(JSON.stringify(data)).toString('base64')
+}
 
-  if (options.useAuthHeader !== false) {
-    headers['Authorization'] = options.badSecret ? 'wrong-secret' : WEBHOOK_SECRET
-  }
+function makeXVerify(base64Response: string) {
+  const hash = createHash('sha256').update(base64Response + MERCHANT_KEY).digest('hex')
+  return `${hash}###${KEY_INDEX}`
+}
 
-  if (options.useSigHeader) {
-    const sig = createHmac('sha256', WEBHOOK_SECRET).update(rawBody).digest('base64')
-    headers['X-PHONEPE-SIGNATURE'] = sig
-    delete headers['Authorization']
-  }
+function makeWebhookRequest(data: object, options: { badSignature?: boolean } = {}): Request {
+  const base64Response = makeBase64Response(data)
+  const body = JSON.stringify({ response: base64Response })
+  const xVerify = options.badSignature ? 'badsig###1' : makeXVerify(base64Response)
 
   return new Request('http://localhost:3000/api/webhooks/phonepe', {
     method: 'POST',
-    headers,
-    body: rawBody,
+    headers: { 'Content-Type': 'application/json', 'X-VERIFY': xVerify },
+    body,
   })
 }
 
-const completedWebhookPayload = {
-  type: 'checkout.order.completed',
-  payload: {
-    merchantOrderId: 'flatmate-order-123',
-    orderId: 'OMO123456',
-    state: 'COMPLETED',
-    amount: 200000, // paise
-    payments: [
-      {
-        transactionId: 'T123456789',
-        paymentMode: 'UPI',
-        amount: 200000,
-        state: 'COMPLETED',
-      },
-    ],
-  },
+const completedData = {
+  merchantId: 'PGTESTPAYUAT',
+  merchantTransactionId: 'flatmate-order-123',
+  transactionId: 'T123456789',
+  amount: 200000,
+  state: 'COMPLETED',
+  paymentInstrument: { type: 'UPI_INTENT' },
 }
 
-const failedWebhookPayload = {
-  type: 'checkout.order.failed',
-  payload: {
-    merchantOrderId: 'flatmate-order-123',
-    orderId: 'OMO123456',
-    state: 'FAILED',
-    amount: 200000,
-    errorCode: 'PAYMENT_ERROR',
-    payments: [],
-  },
+const failedData = {
+  merchantId: 'PGTESTPAYUAT',
+  merchantTransactionId: 'flatmate-order-123',
+  amount: 200000,
+  state: 'FAILED',
+  responseCode: 'PAYMENT_ERROR',
 }
 
 const samplePayment = {
@@ -102,7 +85,8 @@ const samplePayment = {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  process.env.PHONEPE_WEBHOOK_SECRET = WEBHOOK_SECRET
+  process.env.PHONEPE_MERCHANT_KEY = MERCHANT_KEY
+  process.env.PHONEPE_KEY_INDEX = KEY_INDEX
   mockAudit.mockResolvedValue(undefined as never)
   mockSendReceiptEmail.mockResolvedValue(undefined)
   mockUpdate.mockResolvedValue({ ...samplePayment, status: 'SUCCESS' } as never)
@@ -110,48 +94,50 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  delete process.env.PHONEPE_WEBHOOK_SECRET
+  delete process.env.PHONEPE_MERCHANT_KEY
+  delete process.env.PHONEPE_KEY_INDEX
 })
 
 describe('POST /api/webhooks/phonepe', () => {
-  it('returns 400 for invalid signature (wrong Authorization header)', async () => {
-    const req = makeWebhookRequest(completedWebhookPayload, { badSecret: true })
+  it('returns 400 for invalid X-VERIFY signature', async () => {
+    const req = makeWebhookRequest(completedData, { badSignature: true })
     const res = await POST(req)
     expect(res.status).toBe(400)
     const json = await res.json()
     expect(json.error).toContain('signature')
   })
 
-  it('returns 400 when PHONEPE_WEBHOOK_SECRET is not set', async () => {
-    delete process.env.PHONEPE_WEBHOOK_SECRET
-    const req = makeWebhookRequest(completedWebhookPayload)
+  it('returns 400 when PHONEPE_MERCHANT_KEY is not set', async () => {
+    delete process.env.PHONEPE_MERCHANT_KEY
+    const req = makeWebhookRequest(completedData)
     const res = await POST(req)
     expect(res.status).toBe(400)
   })
 
-  it('validates valid Authorization header and processes completed payment', async () => {
+  it('returns 400 for invalid JSON body', async () => {
+    const req = new Request('http://localhost:3000/api/webhooks/phonepe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-VERIFY': 'any###1' },
+      body: 'not-json',
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(400)
+  })
+
+  it('processes COMPLETED payment with valid signature', async () => {
     mockFindUnique.mockResolvedValue(samplePayment as never)
 
-    const req = makeWebhookRequest(completedWebhookPayload, { useAuthHeader: true })
+    const req = makeWebhookRequest(completedData)
     const res = await POST(req)
     expect(res.status).toBe(200)
     const json = await res.json()
     expect(json.success).toBe(true)
   })
 
-  it('validates valid X-PHONEPE-SIGNATURE header and processes completed payment', async () => {
+  it('updates payment to SUCCESS on COMPLETED state', async () => {
     mockFindUnique.mockResolvedValue(samplePayment as never)
 
-    const req = makeWebhookRequest(completedWebhookPayload, { useSigHeader: true })
-    const res = await POST(req)
-    expect(res.status).toBe(200)
-  })
-
-  it('updates payment to SUCCESS on completed event', async () => {
-    mockFindUnique.mockResolvedValue(samplePayment as never)
-
-    const req = makeWebhookRequest(completedWebhookPayload)
-    await POST(req)
+    await POST(makeWebhookRequest(completedData))
 
     expect(mockUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -161,21 +147,28 @@ describe('POST /api/webhooks/phonepe', () => {
     )
   })
 
-  it('sets phonePeTxnId on success', async () => {
+  it('sets phonePeTxnId from transactionId on success', async () => {
     mockFindUnique.mockResolvedValue(samplePayment as never)
 
-    const req = makeWebhookRequest(completedWebhookPayload)
-    await POST(req)
+    await POST(makeWebhookRequest(completedData))
 
     const updateArg = mockUpdate.mock.calls[0][0] as { data: Record<string, unknown> }
     expect(updateArg.data.phonePeTxnId).toBe('T123456789')
   })
 
+  it('sets paymentMethod from paymentInstrument.type', async () => {
+    mockFindUnique.mockResolvedValue(samplePayment as never)
+
+    await POST(makeWebhookRequest(completedData))
+
+    const updateArg = mockUpdate.mock.calls[0][0] as { data: Record<string, unknown> }
+    expect(updateArg.data.paymentMethod).toBe('UPI_INTENT')
+  })
+
   it('writes PAYMENT_SUCCESS audit log', async () => {
     mockFindUnique.mockResolvedValue(samplePayment as never)
 
-    const req = makeWebhookRequest(completedWebhookPayload)
-    await POST(req)
+    await POST(makeWebhookRequest(completedData))
 
     expect(mockAudit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -189,8 +182,7 @@ describe('POST /api/webhooks/phonepe', () => {
   it('calls sendReceiptEmail on success', async () => {
     mockFindUnique.mockResolvedValue(samplePayment as never)
 
-    const req = makeWebhookRequest(completedWebhookPayload)
-    await POST(req)
+    await POST(makeWebhookRequest(completedData))
 
     expect(mockSendReceiptEmail).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -202,11 +194,10 @@ describe('POST /api/webhooks/phonepe', () => {
     )
   })
 
-  it('updates payment to FAILED on failed event', async () => {
+  it('updates payment to FAILED on FAILED state', async () => {
     mockFindUnique.mockResolvedValue(samplePayment as never)
 
-    const req = makeWebhookRequest(failedWebhookPayload)
-    await POST(req)
+    await POST(makeWebhookRequest(failedData))
 
     expect(mockUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -216,11 +207,19 @@ describe('POST /api/webhooks/phonepe', () => {
     )
   })
 
+  it('sets failureReason from responseCode', async () => {
+    mockFindUnique.mockResolvedValue(samplePayment as never)
+
+    await POST(makeWebhookRequest(failedData))
+
+    const updateArg = mockUpdate.mock.calls[0][0] as { data: Record<string, unknown> }
+    expect(updateArg.data.failureReason).toBe('PAYMENT_ERROR')
+  })
+
   it('writes PAYMENT_FAILED audit log on failed event', async () => {
     mockFindUnique.mockResolvedValue(samplePayment as never)
 
-    const req = makeWebhookRequest(failedWebhookPayload)
-    await POST(req)
+    await POST(makeWebhookRequest(failedData))
 
     expect(mockAudit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -231,21 +230,10 @@ describe('POST /api/webhooks/phonepe', () => {
     )
   })
 
-  it('sets failureReason from errorCode', async () => {
-    mockFindUnique.mockResolvedValue(samplePayment as never)
-
-    const req = makeWebhookRequest(failedWebhookPayload)
-    await POST(req)
-
-    const updateArg = mockUpdate.mock.calls[0][0] as { data: Record<string, unknown> }
-    expect(updateArg.data.failureReason).toBe('PAYMENT_ERROR')
-  })
-
   it('returns 200 for unknown merchantOrderId (graceful ignore)', async () => {
     mockFindUnique.mockResolvedValue(null)
 
-    const req = makeWebhookRequest(completedWebhookPayload)
-    const res = await POST(req)
+    const res = await POST(makeWebhookRequest(completedData))
     expect(res.status).toBe(200)
     expect(mockUpdate).not.toHaveBeenCalled()
   })
@@ -253,8 +241,7 @@ describe('POST /api/webhooks/phonepe', () => {
   it('returns 200 without updating if payment already SUCCESS (idempotency)', async () => {
     mockFindUnique.mockResolvedValue({ ...samplePayment, status: 'SUCCESS' } as never)
 
-    const req = makeWebhookRequest(completedWebhookPayload)
-    const res = await POST(req)
+    const res = await POST(makeWebhookRequest(completedData))
     expect(res.status).toBe(200)
     expect(mockUpdate).not.toHaveBeenCalled()
     expect(mockAudit).not.toHaveBeenCalled()
@@ -266,8 +253,7 @@ describe('POST /api/webhooks/phonepe', () => {
       unit: { residents: [] },
     } as never)
 
-    const req = makeWebhookRequest(completedWebhookPayload)
-    await POST(req)
+    await POST(makeWebhookRequest(completedData))
 
     expect(mockSendReceiptEmail).not.toHaveBeenCalled()
   })

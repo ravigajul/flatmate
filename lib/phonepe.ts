@@ -1,74 +1,32 @@
-// PhonePe v2 API — OAuth 2.0 based integration
-
-let cachedToken: { token: string; expiresAt: number } | null = null
+// PhonePe v1 API — SHA-256 / X-VERIFY based integration
+import { createHash } from 'crypto'
 
 function getEnvVars() {
-  const clientId = process.env.PHONEPE_CLIENT_ID
-  const clientSecret = process.env.PHONEPE_CLIENT_SECRET
-  const clientVersion = process.env.PHONEPE_CLIENT_VERSION ?? '1'
-  const webhookSecret = process.env.PHONEPE_WEBHOOK_SECRET
+  const merchantId = process.env.PHONEPE_MERCHANT_ID
+  const saltKey = process.env.PHONEPE_MERCHANT_KEY
+  const saltIndex = process.env.PHONEPE_KEY_INDEX ?? '1'
   const env = process.env.PHONEPE_ENV ?? 'SANDBOX'
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
 
-  if (!clientId || !clientSecret || !webhookSecret) {
-    throw new Error('PhonePe env vars not configured')
+  if (!merchantId || !saltKey) {
+    throw new Error('PhonePe env vars not configured (PHONEPE_MERCHANT_ID / PHONEPE_MERCHANT_KEY)')
   }
 
-  return { clientId, clientSecret, clientVersion, webhookSecret, env, appUrl }
+  return { merchantId, saltKey, saltIndex, env, appUrl }
 }
 
-function getBaseUrls(env: string) {
+function getBaseUrl(env: string) {
   if (env === 'PRODUCTION') {
-    return {
-      authBase: 'https://api.phonepe.com/apis/identity-manager',
-      pgBase: 'https://api.phonepe.com/apis/pg',
-    }
+    return 'https://api.phonepe.com/apis/hermes'
   }
-  // SANDBOX
-  return {
-    authBase: 'https://api-preprod.phonepe.com/apis/pg-sandbox',
-    pgBase: 'https://api-preprod.phonepe.com/apis/pg-sandbox',
-  }
+  return 'https://api-preprod.phonepe.com/apis/pg-sandbox'
 }
 
-async function getAccessToken(): Promise<string> {
-  // Return cached token if still valid (with 60s buffer)
-  if (cachedToken && Date.now() < cachedToken.expiresAt - 60_000) {
-    return cachedToken.token
-  }
-
-  const { clientId, clientSecret, clientVersion, env } = getEnvVars()
-  const { authBase } = getBaseUrls(env)
-
-  const body = new URLSearchParams({
-    grant_type: 'client_credentials',
-    client_id: clientId,
-    client_secret: clientSecret,
-    client_version: clientVersion,
-  })
-
-  const res = await fetch(`${authBase}/v1/oauth/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  })
-
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`PhonePe token fetch failed: ${res.status} ${text}`)
-  }
-
-  const data = (await res.json()) as {
-    access_token: string
-    expires_in: number
-  }
-
-  cachedToken = {
-    token: data.access_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
-  }
-
-  return cachedToken.token
+function buildXVerify(data: string, endpoint: string, saltKey: string, saltIndex: string) {
+  const hash = createHash('sha256')
+    .update(data + endpoint + saltKey)
+    .digest('hex')
+  return `${hash}###${saltIndex}`
 }
 
 export async function initiatePayment(params: {
@@ -76,42 +34,38 @@ export async function initiatePayment(params: {
   amountPaise: number
   redirectUrl: string
 }): Promise<string> {
-  const { env } = getEnvVars()
-  const { pgBase } = getBaseUrls(env)
-  const token = await getAccessToken()
+  const { merchantId, saltKey, saltIndex, env, appUrl } = getEnvVars()
+  const baseUrl = getBaseUrl(env)
 
-  const res = await fetch(`${pgBase}/checkout/v2/pay`, {
+  const payload = {
+    merchantId,
+    merchantTransactionId: params.merchantOrderId,
+    amount: params.amountPaise,
+    redirectUrl: params.redirectUrl,
+    redirectMode: 'REDIRECT',
+    callbackUrl: `${appUrl}/api/webhooks/phonepe`,
+    paymentInstrument: { type: 'PAY_PAGE' },
+  }
+
+  const base64Payload = Buffer.from(JSON.stringify(payload)).toString('base64')
+  const xVerify = buildXVerify(base64Payload, '/pg/v1/pay', saltKey, saltIndex)
+
+  const res = await fetch(`${baseUrl}/pg/v1/pay`, {
     method: 'POST',
     headers: {
-      Authorization: `O-Bearer ${token}`,
       'Content-Type': 'application/json',
+      'X-VERIFY': xVerify,
     },
-    body: JSON.stringify({
-      merchantOrderId: params.merchantOrderId,
-      amount: params.amountPaise,
-      expireAfter: 1200,
-      paymentFlow: {
-        type: 'PG_CHECKOUT',
-        message: 'Monthly maintenance fee',
-        merchantUrls: {
-          redirectUrl: params.redirectUrl,
-        },
-      },
-    }),
+    body: JSON.stringify({ request: base64Payload }),
   })
 
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`PhonePe initiatePayment failed: ${res.status} ${text}`)
+  const data = await res.json()
+
+  if (!res.ok || !data.success) {
+    throw new Error(`PhonePe initiatePayment failed: ${data.message ?? res.status}`)
   }
 
-  const data = (await res.json()) as {
-    orderId: string
-    state: string
-    redirectUrl: string
-  }
-
-  return data.redirectUrl
+  return data.data.instrumentResponse.redirectInfo.url as string
 }
 
 export async function getOrderStatus(merchantOrderId: string): Promise<{
@@ -119,41 +73,36 @@ export async function getOrderStatus(merchantOrderId: string): Promise<{
   transactionId?: string
   paymentMode?: string
 }> {
-  const { env } = getEnvVars()
-  const { pgBase } = getBaseUrls(env)
-  const token = await getAccessToken()
+  const { merchantId, saltKey, saltIndex, env } = getEnvVars()
+  const baseUrl = getBaseUrl(env)
 
-  const res = await fetch(`${pgBase}/checkout/v2/order/${merchantOrderId}/status`, {
+  const endpoint = `/pg/v1/status/${merchantId}/${merchantOrderId}`
+  const xVerify = buildXVerify('', endpoint, saltKey, saltIndex)
+
+  const res = await fetch(`${baseUrl}${endpoint}`, {
     method: 'GET',
     headers: {
-      Authorization: `O-Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-VERIFY': xVerify,
+      'X-MERCHANT-ID': merchantId,
     },
   })
 
+  const data = await res.json()
+
   if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`PhonePe getOrderStatus failed: ${res.status} ${text}`)
+    throw new Error(`PhonePe getOrderStatus failed: ${data.message ?? res.status}`)
   }
 
-  const data = (await res.json()) as {
-    orderId: string
-    merchantOrderId: string
-    state: 'COMPLETED' | 'FAILED' | 'PENDING'
-    amount: number
-    payments?: Array<{
-      transactionId: string
-      paymentMode: string
-      amount: number
-      state: string
-    }>
-  }
-
-  const firstPayment = data.payments?.[0]
+  const txn = data.data
+  let state: 'COMPLETED' | 'FAILED' | 'PENDING' = 'PENDING'
+  if (txn?.state === 'COMPLETED') state = 'COMPLETED'
+  else if (txn?.state === 'FAILED') state = 'FAILED'
 
   return {
-    state: data.state,
-    transactionId: firstPayment?.transactionId,
-    paymentMode: firstPayment?.paymentMode,
+    state,
+    transactionId: txn?.transactionId,
+    paymentMode: txn?.paymentInstrument?.type,
   }
 }
 
@@ -162,30 +111,34 @@ export async function initiateRefund(params: {
   originalMerchantOrderId: string
   amountPaise: number
 }): Promise<void> {
-  const { env } = getEnvVars()
-  const { pgBase } = getBaseUrls(env)
-  const token = await getAccessToken()
+  const { merchantId, saltKey, saltIndex, env, appUrl } = getEnvVars()
+  const baseUrl = getBaseUrl(env)
 
-  const res = await fetch(`${pgBase}/payments/v2/refund`, {
+  const payload = {
+    merchantId,
+    merchantTransactionId: params.merchantRefundId,
+    originalTransactionId: params.originalMerchantOrderId,
+    amount: params.amountPaise,
+    callbackUrl: `${appUrl}/api/webhooks/phonepe`,
+  }
+
+  const base64Payload = Buffer.from(JSON.stringify(payload)).toString('base64')
+  const xVerify = buildXVerify(base64Payload, '/pg/v1/refund', saltKey, saltIndex)
+
+  const res = await fetch(`${baseUrl}/pg/v1/refund`, {
     method: 'POST',
     headers: {
-      Authorization: `O-Bearer ${token}`,
       'Content-Type': 'application/json',
+      'X-VERIFY': xVerify,
     },
-    body: JSON.stringify({
-      merchantRefundId: params.merchantRefundId,
-      originalMerchantOrderId: params.originalMerchantOrderId,
-      amount: params.amountPaise,
-    }),
+    body: JSON.stringify({ request: base64Payload }),
   })
 
   if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`PhonePe initiateRefund failed: ${res.status} ${text}`)
+    const errData = await res.json().catch(() => ({}))
+    throw new Error(`PhonePe initiateRefund failed: ${(errData as { message?: string }).message ?? res.status}`)
   }
 }
 
-// Export for testing purposes
-export function _resetTokenCache() {
-  cachedToken = null
-}
+// No-op — v1 has no token cache
+export function _resetTokenCache() {}

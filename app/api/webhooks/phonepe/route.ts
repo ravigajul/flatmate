@@ -1,83 +1,71 @@
 import { prisma } from '@/lib/prisma'
 import { writeAuditLog } from '@/lib/audit'
 import { sendReceiptEmail } from '@/lib/email'
-import { createHmac, timingSafeEqual } from 'crypto'
+import { createHash, timingSafeEqual } from 'crypto'
 import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
-function verifySignature(rawBody: string, authHeader: string, sigHeader: string): boolean {
-  const webhookSecret = process.env.PHONEPE_WEBHOOK_SECRET
-  if (!webhookSecret) return false
+function verifySignature(base64Response: string, xVerifyHeader: string): boolean {
+  const saltKey = process.env.PHONEPE_MERCHANT_KEY
+  const saltIndex = process.env.PHONEPE_KEY_INDEX ?? '1'
+  if (!saltKey) return false
 
-  // Primary: check Authorization header matches webhook secret directly
-  if (authHeader === webhookSecret) {
-    return true
+  try {
+    const hash = createHash('sha256')
+      .update(base64Response + saltKey)
+      .digest('hex')
+    const expected = `${hash}###${saltIndex}`
+
+    const a = Buffer.from(xVerifyHeader)
+    const b = Buffer.from(expected)
+    if (a.length !== b.length) return false
+    return timingSafeEqual(a, b)
+  } catch {
+    return false
   }
-
-  // Fallback: check HMAC signature
-  if (sigHeader) {
-    try {
-      const expected = createHmac('sha256', webhookSecret).update(rawBody).digest('base64')
-      const sigBuf = Buffer.from(sigHeader)
-      const expectedBuf = Buffer.from(expected)
-      if (sigBuf.length === expectedBuf.length && timingSafeEqual(sigBuf, expectedBuf)) {
-        return true
-      }
-    } catch {
-      // invalid base64 or other error
-    }
-  }
-
-  return false
 }
 
 export async function POST(request: Request) {
   const rawBody = await request.text()
-  const authHeader = request.headers.get('Authorization') ?? ''
-  const sigHeader = request.headers.get('X-PHONEPE-SIGNATURE') ?? ''
+  const xVerifyHeader = request.headers.get('X-VERIFY') ?? ''
 
-  if (!verifySignature(rawBody, authHeader, sigHeader)) {
-    console.warn('[PhonePe webhook] Invalid signature')
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
-  }
-
-  let payload: {
-    type: string
-    payload: {
-      merchantOrderId: string
-      orderId: string
-      state: string
-      amount: number
-      errorCode?: string
-      payments?: Array<{
-        transactionId: string
-        paymentMode: string
-        amount: number
-        state: string
-      }>
-    }
-  }
-
+  let body: { response?: string }
   try {
-    payload = JSON.parse(rawBody)
+    body = JSON.parse(rawBody)
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const { type, payload: data } = payload
-  const { merchantOrderId, state } = data
-  const firstPayment = data.payments?.[0]
+  const base64Response = body.response ?? ''
 
-  // Find payment by merchantOrderId
+  if (!verifySignature(base64Response, xVerifyHeader)) {
+    console.warn('[PhonePe webhook] Invalid signature')
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
+  }
+
+  let data: {
+    merchantId: string
+    merchantTransactionId: string
+    transactionId?: string
+    amount: number
+    state: string
+    responseCode?: string
+    paymentInstrument?: { type: string }
+  }
+
+  try {
+    data = JSON.parse(Buffer.from(base64Response, 'base64').toString('utf-8'))
+  } catch {
+    return NextResponse.json({ error: 'Invalid payload' }, { status: 400 })
+  }
+
+  const { merchantTransactionId: merchantOrderId, state, transactionId, responseCode } = data
+
   const payment = await prisma.payment.findUnique({
     where: { phonePeMerchantOrderId: merchantOrderId },
     include: {
-      feeSchedule: {
-        select: {
-          monthYear: true,
-        },
-      },
+      feeSchedule: { select: { monthYear: true } },
       unit: {
         include: {
           residents: {
@@ -99,7 +87,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true })
   }
 
-  if (type === 'checkout.order.completed' && state === 'COMPLETED') {
+  const systemUserId = await prisma.user
+    .findFirst({ where: { unitId: payment.unitId }, select: { id: true } })
+    .then((u) => u?.id ?? payment.unitId)
+
+  if (state === 'COMPLETED') {
     const paidAt = new Date()
     const amountInINR = (data.amount ?? 0) / 100
 
@@ -107,32 +99,20 @@ export async function POST(request: Request) {
       where: { id: payment.id },
       data: {
         status: 'SUCCESS',
-        phonePeTxnId: firstPayment?.transactionId ?? null,
+        phonePeTxnId: transactionId ?? null,
         paidAt,
-        paymentMethod: firstPayment?.paymentMode ?? null,
+        paymentMethod: data.paymentInstrument?.type ?? null,
       },
     })
-
-    // Find system user for audit log (use a placeholder if needed)
-    const systemUserId = payment.unit.residents[0]
-      ? await prisma.user
-          .findFirst({ where: { unitId: payment.unitId }, select: { id: true } })
-          .then((u) => u?.id ?? payment.unitId)
-      : payment.unitId
 
     await writeAuditLog({
       userId: systemUserId,
       action: 'PAYMENT_SUCCESS',
       entity: 'Payment',
       entityId: payment.id,
-      metadata: {
-        merchantOrderId,
-        transactionId: firstPayment?.transactionId,
-        amount: amountInINR,
-      },
+      metadata: { merchantOrderId, transactionId, amount: amountInINR },
     })
 
-    // Send receipt email
     const resident = payment.unit.residents[0]
     if (resident?.email) {
       await sendReceiptEmail({
@@ -140,33 +120,26 @@ export async function POST(request: Request) {
         residentName: resident.name ?? 'Resident',
         amount: amountInINR,
         monthYear: payment.feeSchedule.monthYear,
-        transactionId: firstPayment?.transactionId ?? merchantOrderId,
+        transactionId: transactionId ?? merchantOrderId,
       }).catch((err) => {
         console.error('[PhonePe webhook] Failed to send receipt email:', err)
       })
     }
-  } else if (type === 'checkout.order.failed' || state === 'FAILED') {
+  } else if (state === 'FAILED') {
     await prisma.payment.update({
       where: { id: payment.id },
       data: {
         status: 'FAILED',
-        failureReason: data.errorCode ?? 'Payment failed',
+        failureReason: responseCode ?? 'Payment failed',
       },
     })
-
-    const systemUserId = await prisma.user
-      .findFirst({ where: { unitId: payment.unitId }, select: { id: true } })
-      .then((u) => u?.id ?? payment.unitId)
 
     await writeAuditLog({
       userId: systemUserId,
       action: 'PAYMENT_FAILED',
       entity: 'Payment',
       entityId: payment.id,
-      metadata: {
-        merchantOrderId,
-        errorCode: data.errorCode,
-      },
+      metadata: { merchantOrderId, responseCode },
     })
   }
 

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { createHash } from 'crypto'
 
 import { initiatePayment, getOrderStatus, initiateRefund, _resetTokenCache } from '@/lib/phonepe'
 
@@ -6,21 +7,16 @@ const mockFetch = vi.fn()
 global.fetch = mockFetch
 
 const ENV_VARS = {
-  PHONEPE_CLIENT_ID: 'test-client-id',
-  PHONEPE_CLIENT_SECRET: 'test-client-secret',
-  PHONEPE_CLIENT_VERSION: '1',
-  PHONEPE_WEBHOOK_SECRET: 'test-webhook-secret',
+  PHONEPE_MERCHANT_ID: 'PGTESTPAYUAT',
+  PHONEPE_MERCHANT_KEY: 'test-salt-key',
+  PHONEPE_KEY_INDEX: '1',
   PHONEPE_ENV: 'SANDBOX',
   NEXT_PUBLIC_APP_URL: 'http://localhost:3000',
 }
 
 function setEnvVars(vars: Partial<typeof ENV_VARS> = ENV_VARS) {
   Object.entries({ ...ENV_VARS, ...vars }).forEach(([k, v]) => {
-    if (v === undefined) {
-      delete process.env[k]
-    } else {
-      process.env[k] = v
-    }
+    process.env[k] = v
   })
 }
 
@@ -28,23 +24,24 @@ function clearEnvVars() {
   Object.keys(ENV_VARS).forEach((k) => delete process.env[k])
 }
 
-function makeTokenResponse() {
-  return {
-    ok: true,
-    json: async () => ({ access_token: 'test-access-token', expires_in: 3600 }),
-    text: async () => '',
-  }
-}
-
 function makePayResponse() {
   return {
     ok: true,
     json: async () => ({
-      orderId: 'OMO123',
-      state: 'PENDING',
-      redirectUrl: 'https://mercury.phonepe.com/pay?token=abc',
+      success: true,
+      data: {
+        instrumentResponse: {
+          redirectInfo: { url: 'https://mercury-uat.phonepe.com/pay?token=abc' },
+        },
+      },
     }),
-    text: async () => '',
+  }
+}
+
+function makePayFailResponse() {
+  return {
+    ok: true,
+    json: async () => ({ success: false, message: 'INVALID_MERCHANT' }),
   }
 }
 
@@ -52,16 +49,15 @@ function makeStatusResponse(state: 'COMPLETED' | 'FAILED' | 'PENDING' = 'COMPLET
   return {
     ok: true,
     json: async () => ({
-      orderId: 'OMO123',
-      merchantOrderId: 'flatmate-test',
-      state,
-      amount: 200000,
-      payments:
-        state === 'COMPLETED'
-          ? [{ transactionId: 'T123', paymentMode: 'UPI', amount: 200000, state: 'COMPLETED' }]
-          : [],
+      success: true,
+      data: {
+        merchantTransactionId: 'flatmate-test',
+        transactionId: state === 'COMPLETED' ? 'T123' : undefined,
+        state,
+        amount: 200000,
+        paymentInstrument: state === 'COMPLETED' ? { type: 'UPI_INTENT' } : undefined,
+      },
     }),
-    text: async () => '',
   }
 }
 
@@ -69,7 +65,6 @@ function makeRefundResponse() {
   return {
     ok: true,
     json: async () => ({ success: true }),
-    text: async () => '',
   }
 }
 
@@ -92,10 +87,8 @@ describe('initiatePayment', () => {
     ).rejects.toThrow('PhonePe env vars not configured')
   })
 
-  it('fetches an OAuth token first', async () => {
-    mockFetch
-      .mockResolvedValueOnce(makeTokenResponse())
-      .mockResolvedValueOnce(makePayResponse())
+  it('calls the v1 pay endpoint', async () => {
+    mockFetch.mockResolvedValueOnce(makePayResponse())
 
     await initiatePayment({
       merchantOrderId: 'flatmate-test',
@@ -103,15 +96,13 @@ describe('initiatePayment', () => {
       redirectUrl: 'http://localhost:3000/resident/pay/callback',
     })
 
-    // First call should be to token endpoint
-    const firstCall = mockFetch.mock.calls[0]
-    expect(firstCall[0]).toContain('/v1/oauth/token')
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    const [url] = mockFetch.mock.calls[0]
+    expect(url).toContain('/pg/v1/pay')
   })
 
-  it('calls the pay endpoint with correct payload', async () => {
-    mockFetch
-      .mockResolvedValueOnce(makeTokenResponse())
-      .mockResolvedValueOnce(makePayResponse())
+  it('sends base64-encoded payload in request body', async () => {
+    mockFetch.mockResolvedValueOnce(makePayResponse())
 
     await initiatePayment({
       merchantOrderId: 'flatmate-test',
@@ -119,19 +110,18 @@ describe('initiatePayment', () => {
       redirectUrl: 'http://localhost:3000/resident/pay/callback',
     })
 
-    const payCall = mockFetch.mock.calls[1]
-    expect(payCall[0]).toContain('/checkout/v2/pay')
-
-    const body = JSON.parse(payCall[1].body as string)
-    expect(body.merchantOrderId).toBe('flatmate-test')
-    expect(body.amount).toBe(200000)
-    expect(body.paymentFlow.type).toBe('PG_CHECKOUT')
+    const [, init] = mockFetch.mock.calls[0]
+    const body = JSON.parse(init.body as string)
+    expect(body).toHaveProperty('request')
+    const decoded = JSON.parse(Buffer.from(body.request, 'base64').toString('utf-8'))
+    expect(decoded.merchantId).toBe('PGTESTPAYUAT')
+    expect(decoded.merchantTransactionId).toBe('flatmate-test')
+    expect(decoded.amount).toBe(200000)
+    expect(decoded.paymentInstrument.type).toBe('PAY_PAGE')
   })
 
-  it('uses O-Bearer authorization header', async () => {
-    mockFetch
-      .mockResolvedValueOnce(makeTokenResponse())
-      .mockResolvedValueOnce(makePayResponse())
+  it('sends a valid X-VERIFY header', async () => {
+    mockFetch.mockResolvedValueOnce(makePayResponse())
 
     await initiatePayment({
       merchantOrderId: 'flatmate-test',
@@ -139,14 +129,17 @@ describe('initiatePayment', () => {
       redirectUrl: 'http://localhost:3000/resident/pay/callback',
     })
 
-    const payCall = mockFetch.mock.calls[1]
-    expect(payCall[1].headers['Authorization']).toBe('O-Bearer test-access-token')
+    const [, init] = mockFetch.mock.calls[0]
+    const body = JSON.parse(init.body as string)
+    const base64Payload = body.request as string
+    const expectedHash = createHash('sha256')
+      .update(base64Payload + '/pg/v1/pay' + 'test-salt-key')
+      .digest('hex')
+    expect(init.headers['X-VERIFY']).toBe(`${expectedHash}###1`)
   })
 
-  it('returns the redirectUrl from PhonePe', async () => {
-    mockFetch
-      .mockResolvedValueOnce(makeTokenResponse())
-      .mockResolvedValueOnce(makePayResponse())
+  it('returns the redirect URL from PhonePe', async () => {
+    mockFetch.mockResolvedValueOnce(makePayResponse())
 
     const result = await initiatePayment({
       merchantOrderId: 'flatmate-test',
@@ -154,14 +147,26 @@ describe('initiatePayment', () => {
       redirectUrl: 'http://localhost:3000/resident/pay/callback',
     })
 
-    expect(result).toBe('https://mercury.phonepe.com/pay?token=abc')
+    expect(result).toBe('https://mercury-uat.phonepe.com/pay?token=abc')
   })
 
-  it('throws on non-OK response from pay endpoint', async () => {
-    mockFetch.mockResolvedValueOnce(makeTokenResponse()).mockResolvedValueOnce({
+  it('throws when response success is false', async () => {
+    mockFetch.mockResolvedValueOnce(makePayFailResponse())
+
+    await expect(
+      initiatePayment({
+        merchantOrderId: 'flatmate-test',
+        amountPaise: 200000,
+        redirectUrl: 'http://localhost:3000/resident/pay/callback',
+      })
+    ).rejects.toThrow('PhonePe initiatePayment failed')
+  })
+
+  it('throws on non-OK HTTP response', async () => {
+    mockFetch.mockResolvedValueOnce({
       ok: false,
-      status: 400,
-      text: async () => 'Bad Request',
+      status: 500,
+      json: async () => ({ message: 'Server Error' }),
     })
 
     await expect(
@@ -182,43 +187,57 @@ describe('getOrderStatus', () => {
     )
   })
 
-  it('calls the status endpoint with merchantOrderId', async () => {
-    mockFetch
-      .mockResolvedValueOnce(makeTokenResponse())
-      .mockResolvedValueOnce(makeStatusResponse('COMPLETED'))
+  it('calls the v1 status endpoint with merchantId and transactionId', async () => {
+    mockFetch.mockResolvedValueOnce(makeStatusResponse('COMPLETED'))
 
     await getOrderStatus('flatmate-test')
 
-    const statusCall = mockFetch.mock.calls[1]
-    expect(statusCall[0]).toContain('/checkout/v2/order/flatmate-test/status')
+    const [url] = mockFetch.mock.calls[0]
+    expect(url).toContain('/pg/v1/status/PGTESTPAYUAT/flatmate-test')
   })
 
-  it('returns COMPLETED state and transactionId', async () => {
-    mockFetch
-      .mockResolvedValueOnce(makeTokenResponse())
-      .mockResolvedValueOnce(makeStatusResponse('COMPLETED'))
+  it('sends a valid X-VERIFY header for status', async () => {
+    mockFetch.mockResolvedValueOnce(makeStatusResponse('COMPLETED'))
+
+    await getOrderStatus('flatmate-test')
+
+    const [, init] = mockFetch.mock.calls[0]
+    const endpoint = '/pg/v1/status/PGTESTPAYUAT/flatmate-test'
+    const expectedHash = createHash('sha256')
+      .update('' + endpoint + 'test-salt-key')
+      .digest('hex')
+    expect(init.headers['X-VERIFY']).toBe(`${expectedHash}###1`)
+  })
+
+  it('returns COMPLETED state with transactionId and paymentMode', async () => {
+    mockFetch.mockResolvedValueOnce(makeStatusResponse('COMPLETED'))
 
     const result = await getOrderStatus('flatmate-test')
     expect(result.state).toBe('COMPLETED')
     expect(result.transactionId).toBe('T123')
-    expect(result.paymentMode).toBe('UPI')
+    expect(result.paymentMode).toBe('UPI_INTENT')
   })
 
-  it('returns FAILED state with no transactionId', async () => {
-    mockFetch
-      .mockResolvedValueOnce(makeTokenResponse())
-      .mockResolvedValueOnce(makeStatusResponse('FAILED'))
+  it('returns FAILED state', async () => {
+    mockFetch.mockResolvedValueOnce(makeStatusResponse('FAILED'))
 
     const result = await getOrderStatus('flatmate-test')
     expect(result.state).toBe('FAILED')
     expect(result.transactionId).toBeUndefined()
   })
 
-  it('throws on non-OK response from status endpoint', async () => {
-    mockFetch.mockResolvedValueOnce(makeTokenResponse()).mockResolvedValueOnce({
+  it('returns PENDING state', async () => {
+    mockFetch.mockResolvedValueOnce(makeStatusResponse('PENDING'))
+
+    const result = await getOrderStatus('flatmate-test')
+    expect(result.state).toBe('PENDING')
+  })
+
+  it('throws on non-OK HTTP response', async () => {
+    mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 404,
-      text: async () => 'Not Found',
+      json: async () => ({ message: 'Not Found' }),
     })
 
     await expect(getOrderStatus('flatmate-test')).rejects.toThrow('PhonePe getOrderStatus failed')
@@ -237,10 +256,8 @@ describe('initiateRefund', () => {
     ).rejects.toThrow('PhonePe env vars not configured')
   })
 
-  it('calls the refund endpoint with correct payload', async () => {
-    mockFetch
-      .mockResolvedValueOnce(makeTokenResponse())
-      .mockResolvedValueOnce(makeRefundResponse())
+  it('calls the v1 refund endpoint', async () => {
+    mockFetch.mockResolvedValueOnce(makeRefundResponse())
 
     await initiateRefund({
       merchantRefundId: 'flatmate-refund-1',
@@ -248,20 +265,32 @@ describe('initiateRefund', () => {
       amountPaise: 200000,
     })
 
-    const refundCall = mockFetch.mock.calls[1]
-    expect(refundCall[0]).toContain('/payments/v2/refund')
-
-    const body = JSON.parse(refundCall[1].body as string)
-    expect(body.merchantRefundId).toBe('flatmate-refund-1')
-    expect(body.originalMerchantOrderId).toBe('flatmate-order-1')
-    expect(body.amount).toBe(200000)
+    const [url] = mockFetch.mock.calls[0]
+    expect(url).toContain('/pg/v1/refund')
   })
 
-  it('throws on non-OK response from refund endpoint', async () => {
-    mockFetch.mockResolvedValueOnce(makeTokenResponse()).mockResolvedValueOnce({
+  it('sends base64-encoded payload with correct fields', async () => {
+    mockFetch.mockResolvedValueOnce(makeRefundResponse())
+
+    await initiateRefund({
+      merchantRefundId: 'flatmate-refund-1',
+      originalMerchantOrderId: 'flatmate-order-1',
+      amountPaise: 200000,
+    })
+
+    const [, init] = mockFetch.mock.calls[0]
+    const body = JSON.parse(init.body as string)
+    const decoded = JSON.parse(Buffer.from(body.request, 'base64').toString('utf-8'))
+    expect(decoded.merchantTransactionId).toBe('flatmate-refund-1')
+    expect(decoded.originalTransactionId).toBe('flatmate-order-1')
+    expect(decoded.amount).toBe(200000)
+  })
+
+  it('throws on non-OK HTTP response', async () => {
+    mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 400,
-      text: async () => 'Bad Request',
+      json: async () => ({ message: 'Bad Request' }),
     })
 
     await expect(
@@ -274,66 +303,8 @@ describe('initiateRefund', () => {
   })
 })
 
-describe('Token caching', () => {
-  it('reuses cached token for second call within expiry (fetch called only once for token)', async () => {
-    mockFetch
-      .mockResolvedValueOnce(makeTokenResponse()) // token fetch
-      .mockResolvedValueOnce(makePayResponse()) // first pay call
-      .mockResolvedValueOnce(makePayResponse()) // second pay call (reuses token)
-
-    await initiatePayment({
-      merchantOrderId: 'flatmate-test-1',
-      amountPaise: 200000,
-      redirectUrl: 'http://localhost:3000/resident/pay/callback',
-    })
-
-    await initiatePayment({
-      merchantOrderId: 'flatmate-test-2',
-      amountPaise: 200000,
-      redirectUrl: 'http://localhost:3000/resident/pay/callback',
-    })
-
-    // Token fetch should have been called only once
-    const tokenCalls = mockFetch.mock.calls.filter((call) =>
-      (call[0] as string).includes('/v1/oauth/token')
-    )
-    expect(tokenCalls).toHaveLength(1)
-
-    // Pay endpoint should have been called twice
-    const payCalls = mockFetch.mock.calls.filter((call) =>
-      (call[0] as string).includes('/checkout/v2/pay')
-    )
-    expect(payCalls).toHaveLength(2)
-  })
-
-  it('fetches a new token after cache is reset', async () => {
-    mockFetch
-      .mockResolvedValueOnce(makeTokenResponse())
-      .mockResolvedValueOnce(makePayResponse())
-
-    await initiatePayment({
-      merchantOrderId: 'flatmate-test-1',
-      amountPaise: 200000,
-      redirectUrl: 'http://localhost:3000/resident/pay/callback',
-    })
-
-    // Reset cache
-    _resetTokenCache()
-
-    mockFetch
-      .mockResolvedValueOnce(makeTokenResponse())
-      .mockResolvedValueOnce(makePayResponse())
-
-    await initiatePayment({
-      merchantOrderId: 'flatmate-test-2',
-      amountPaise: 200000,
-      redirectUrl: 'http://localhost:3000/resident/pay/callback',
-    })
-
-    // Token should have been fetched twice
-    const tokenCalls = mockFetch.mock.calls.filter((call) =>
-      (call[0] as string).includes('/v1/oauth/token')
-    )
-    expect(tokenCalls).toHaveLength(2)
+describe('_resetTokenCache', () => {
+  it('is a no-op in v1 (no token cache)', () => {
+    expect(() => _resetTokenCache()).not.toThrow()
   })
 })
