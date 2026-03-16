@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { signOut } from 'next-auth/react'
@@ -16,6 +17,8 @@ import {
   Home,
   CreditCard,
   ClipboardList,
+  Menu,
+  X,
 } from 'lucide-react'
 import type { Role } from '@prisma/client'
 import { cn } from '@/lib/utils'
@@ -47,6 +50,7 @@ const residentNav = [
 
 export default function Sidebar({ user }: { user: SidebarUser }) {
   const pathname = usePathname()
+  const [mobileOpen, setMobileOpen] = useState(false)
   const isPresident = user.role === 'PRESIDENT' || user.role === 'SUPER_ADMIN'
   const nav = isPresident ? presidentNav : residentNav
 
@@ -59,8 +63,8 @@ export default function Sidebar({ user }: { user: SidebarUser }) {
     ? user.name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()
     : user.email?.[0].toUpperCase() ?? '?'
 
-  return (
-    <aside className="fixed inset-y-0 left-0 w-64 bg-slate-900 flex flex-col z-50">
+  const sidebarContent = (
+    <div className="flex flex-col h-full">
       {/* Logo */}
       <div className="flex items-center gap-3 px-5 py-5 border-b border-slate-800">
         <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -82,6 +86,7 @@ export default function Sidebar({ user }: { user: SidebarUser }) {
             <Link
               key={item.href}
               href={item.href}
+              onClick={() => setMobileOpen(false)}
               className={cn(
                 'sidebar-link',
                 active ? 'sidebar-link-active' : 'sidebar-link-inactive'
@@ -115,6 +120,42 @@ export default function Sidebar({ user }: { user: SidebarUser }) {
           Sign out
         </button>
       </div>
-    </aside>
+    </div>
+  )
+
+  return (
+    <>
+      {/* Mobile toggle button */}
+      <button
+        className="md:hidden fixed top-4 left-4 z-50 w-9 h-9 bg-slate-900 text-white rounded-lg flex items-center justify-center shadow-lg"
+        onClick={() => setMobileOpen((o) => !o)}
+        aria-label="Toggle menu"
+      >
+        {mobileOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+      </button>
+
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/50 z-40"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      {/* Mobile drawer */}
+      <aside
+        className={cn(
+          'md:hidden fixed inset-y-0 left-0 w-64 bg-slate-900 z-40 transition-transform duration-200',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+        )}
+      >
+        {sidebarContent}
+      </aside>
+
+      {/* Desktop sidebar */}
+      <aside className="hidden md:flex fixed inset-y-0 left-0 w-64 bg-slate-900 flex-col z-50">
+        {sidebarContent}
+      </aside>
+    </>
   )
 }
