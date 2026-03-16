@@ -29,7 +29,7 @@ export default defineConfig({
       testMatch: '**/auth.setup.ts',
     },
 
-    // 2. Resident tests — reuse saved session
+    // 2. Resident tests — reuse saved resident session
     {
       name: 'resident',
       testMatch: '**/resident/*.spec.ts',
@@ -40,7 +40,18 @@ export default defineConfig({
       },
     },
 
-    // 3. Unauthenticated tests (login page, redirects)
+    // 3. President / Super Admin tests — reuse saved super_admin session
+    {
+      name: 'president',
+      testMatch: '**/president/*.spec.ts',
+      dependencies: ['auth-setup'],
+      use: {
+        ...devices['Google Chrome'],
+        storageState: 'e2e/.auth/super_admin.json',
+      },
+    },
+
+    // 4. Unauthenticated tests (login page, redirects)
     {
       name: 'unauthenticated',
       testMatch: '**/unauthenticated/*.spec.ts',

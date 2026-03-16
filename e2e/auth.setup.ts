@@ -1,9 +1,11 @@
 /**
  * Auth Setup — runs once before all tests.
  *
- * Creates a NextAuth v5 JWT cookie for the resident test account
- * (rkalwaysravi@gmail.com) and saves it as Playwright storageState.
- * This bypasses Google OAuth so tests run without a browser sign-in.
+ * Creates NextAuth v5 JWT cookies for:
+ *   1. resident test account  → e2e/.auth/resident.json
+ *   2. super_admin test account → e2e/.auth/super_admin.json
+ *
+ * Bypasses Google OAuth so tests run without a browser sign-in.
  */
 import { test as setup } from '@playwright/test'
 import { encode } from 'next-auth/jwt'
@@ -24,12 +26,24 @@ const RESIDENT_USER = {
   isActive: true,
 }
 
-setup('create resident session', async ({ request }) => {
-  const secret = process.env.NEXTAUTH_SECRET
-  if (!secret) throw new Error('NEXTAUTH_SECRET not found in .env.local')
+const SUPER_ADMIN_USER = {
+  sub: 'e2e-super-admin-test-user-01',
+  id: 'e2e-super-admin-test-user-01',
+  email: 'admin@flatmate.test',
+  name: 'Test Admin',
+  role: 'SUPER_ADMIN',
+  unitId: null,
+  isActive: true,
+}
 
+async function createSession(
+  secret: string,
+  payload: Record<string, unknown>,
+  filename: string,
+  authDir: string,
+) {
   const token = await encode({
-    token: RESIDENT_USER,
+    token: payload,
     secret,
     salt: 'authjs.session-token',
   })
@@ -50,15 +64,33 @@ setup('create resident session', async ({ request }) => {
     origins: [],
   }
 
+  fs.writeFileSync(path.join(authDir, filename), JSON.stringify(storageState, null, 2))
+  return token
+}
+
+setup('create resident session', async ({ request }) => {
+  const secret = process.env.NEXTAUTH_SECRET
+  if (!secret) throw new Error('NEXTAUTH_SECRET not found in .env.local')
+
   const authDir = path.resolve(__dirname, '.auth')
   if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true })
-  fs.writeFileSync(path.join(authDir, 'resident.json'), JSON.stringify(storageState, null, 2))
 
-  // Verify the session works by hitting the resident dashboard
-  const response = await request.get('http://localhost:3000/resident', {
-    headers: { Cookie: `authjs.session-token=${token}` },
+  const residentToken = await createSession(secret, RESIDENT_USER, 'resident.json', authDir)
+  const adminToken = await createSession(secret, SUPER_ADMIN_USER, 'super_admin.json', authDir)
+
+  // Verify resident session
+  const residentRes = await request.get('http://localhost:3000/resident', {
+    headers: { Cookie: `authjs.session-token=${residentToken}` },
   })
-  if (response.status() !== 200) {
-    throw new Error(`Auth setup failed: /resident returned ${response.status()}`)
+  if (residentRes.status() !== 200) {
+    throw new Error(`Resident auth setup failed: /resident returned ${residentRes.status()}`)
+  }
+
+  // Verify super_admin session
+  const adminRes = await request.get('http://localhost:3000/president', {
+    headers: { Cookie: `authjs.session-token=${adminToken}` },
+  })
+  if (adminRes.status() !== 200) {
+    throw new Error(`Super admin auth setup failed: /president returned ${adminRes.status()}`)
   }
 })
