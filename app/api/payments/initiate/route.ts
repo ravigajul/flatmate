@@ -59,10 +59,11 @@ export async function POST(request: Request) {
   const totalAmount = feeSchedule.amount + lateFeeApplied
 
   // Generate unique merchant order ID
-  const merchantOrderId = 'flatmate-' + crypto.randomUUID()
+  // Max 38 chars — 'fm' (2) + UUID without dashes (32) = 34
+  const merchantOrderId = 'fm' + crypto.randomUUID().replace(/-/g, '')
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-  const redirectUrl = `${appUrl}/resident/pay/callback`
+  // Redirect is browser-facing (localhost works); webhook needs public tunnel URL
+  const redirectUrl = `${process.env.NEXTAUTH_URL ?? 'http://localhost:3000'}/resident/pay/callback`
 
   // Create Payment record first (PENDING)
   const payment = await prisma.payment.create({
@@ -86,11 +87,20 @@ export async function POST(request: Request) {
   })
 
   // Call PhonePe to initiate payment
-  const phonePeRedirectUrl = await initiatePayment({
-    merchantOrderId,
-    amountPaise: Math.round(totalAmount * 100),
-    redirectUrl,
-  })
+  let phonePeRedirectUrl: string
+  try {
+    phonePeRedirectUrl = await initiatePayment({
+      merchantOrderId,
+      amountPaise: Math.round(totalAmount * 100),
+      redirectUrl,
+    })
+  } catch (err) {
+    console.error('[payments/initiate] PhonePe error:', err)
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Payment gateway error' },
+      { status: 502 }
+    )
+  }
 
   return NextResponse.json({ redirectUrl: phonePeRedirectUrl, paymentId: payment.id })
 }

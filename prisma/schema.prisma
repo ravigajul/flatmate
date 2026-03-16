@@ -7,167 +7,139 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─── Enums ───────────────────────────────────────────────────────────────────
-
-enum Role {
-  SUPER_ADMIN
-  PRESIDENT
-  RESIDENT
-}
-
-enum IssueStatus {
-  OPEN
-  ASSIGNED
-  IN_PROGRESS
-  RESOLVED
-  CLOSED
-}
-
-enum IssuePriority {
-  LOW
-  MEDIUM
-  HIGH
-  CRITICAL
-}
-
-enum IssueCategory {
-  ELECTRICAL
-  PLUMBING
-  LIFT
-  COMMON_AREA
-  SECURITY
-  CLEANING
-  OTHER
-}
-
-enum PaymentStatus {
-  PENDING
-  SUCCESS
-  FAILED
-  REFUNDED
-}
-
-enum ExpenseCategory {
-  REPAIRS
-  UTILITIES
-  SALARIES
-  CLEANING
-  SECURITY
-  AMC
-  MISCELLANEOUS
-}
-
-enum DocumentCategory {
-  MEETING_MINUTES
-  FINANCIAL_AUDIT
-  MAINTENANCE_CONTRACT
-  INVOICE
-  OTHER
-}
-
-// ─── Models ──────────────────────────────────────────────────────────────────
-
-model User {
-  id        String   @id @default(cuid())
-  email         String    @unique
-  name          String?
-  emailVerified DateTime?
-  phone         String?
-  image         String?
-  role      Role     @default(RESIDENT)
-  unitId    String?
-  isActive  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  unit          Unit?          @relation(fields: [unitId], references: [id])
-  issues        Issue[]
-  issueComments IssueComment[]
-  announcements Announcement[]
-  documents     Document[]
-  auditLogs     AuditLog[]
-  expenses      Expense[]
-  accounts      Account[]
-  sessions      Session[]
-
-  @@index([email])
-  @@index([unitId])
-}
-
 model Account {
-  id                String  @id @default(cuid())
+  id                String  @id
   userId            String
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  User              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
 }
 
-model Session {
-  id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
+model Announcement {
+  id            String   @id
+  title         String
+  body          String
+  attachmentUrl String?
+  postedById    String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime
+  User          User     @relation(fields: [postedById], references: [id])
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([createdAt])
 }
 
-model VerificationToken {
-  identifier String
-  token      String   @unique
-  expires    DateTime
+model AuditLog {
+  id        String   @id
+  userId    String
+  action    String
+  entity    String
+  entityId  String
+  metadata  Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+  User      User     @relation(fields: [userId], references: [id])
 
-  @@unique([identifier, token])
+  @@index([action])
+  @@index([createdAt])
+  @@index([entity, entityId])
+  @@index([userId])
 }
 
-model Unit {
-  id         String   @id @default(cuid())
-  flatNumber String   @unique
-  block      String?
-  floor      Int
-  areaSqft   Float?
-  ownerName  String?
-  isOccupied Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+model Document {
+  id           String           @id
+  name         String
+  url          String
+  category     DocumentCategory
+  fileSize     Int?
+  uploadedById String
+  createdAt    DateTime         @default(now())
+  User         User             @relation(fields: [uploadedById], references: [id])
 
-  residents    User[]
-  feeSchedules FeeSchedule[]
-  payments     Payment[]
-  issues       Issue[]
+  @@index([category])
+}
 
-  @@index([flatNumber])
+model Expense {
+  id          String          @id
+  amount      Float
+  category    ExpenseCategory
+  vendor      String?
+  description String
+  receiptUrl  String?
+  expenseDate DateTime
+  addedById   String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime
+  User        User            @relation(fields: [addedById], references: [id])
+
+  @@index([category])
+  @@index([expenseDate])
 }
 
 model FeeSchedule {
-  id        String   @id @default(cuid())
+  id        String    @id
   unitId    String
   amount    Float
-  lateFee   Float    @default(0)
+  lateFee   Float     @default(0)
   monthYear String
   dueDate   DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  unit     Unit      @relation(fields: [unitId], references: [id])
-  payments Payment[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime
+  Unit      Unit      @relation(fields: [unitId], references: [id])
+  Payment   Payment[]
 
   @@unique([unitId, monthYear])
   @@index([monthYear])
 }
 
+model Issue {
+  id           String         @id
+  unitId       String
+  raisedById   String
+  title        String
+  description  String
+  category     IssueCategory
+  priority     IssuePriority  @default(MEDIUM)
+  status       IssueStatus    @default(OPEN)
+  assignedTo   String?
+  photoUrls    String[]
+  resolvedAt   DateTime?
+  closedAt     DateTime?
+  isEscalated  Boolean        @default(false)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime
+  User         User           @relation(fields: [raisedById], references: [id])
+  Unit         Unit           @relation(fields: [unitId], references: [id])
+  IssueComment IssueComment[]
+
+  @@index([category])
+  @@index([status])
+  @@index([unitId])
+}
+
+model IssueComment {
+  id        String   @id
+  issueId   String
+  authorId  String
+  text      String
+  createdAt DateTime @default(now())
+  User      User     @relation(fields: [authorId], references: [id])
+  Issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@index([issueId])
+}
+
 model Payment {
-  id                     String        @id @default(cuid())
+  id                     String        @id
   unitId                 String
   feeScheduleId          String
   amount                 Float
@@ -180,115 +152,127 @@ model Payment {
   failureReason          String?
   receiptUrl             String?
   createdAt              DateTime      @default(now())
-  updatedAt              DateTime      @updatedAt
+  updatedAt              DateTime
+  FeeSchedule            FeeSchedule   @relation(fields: [feeScheduleId], references: [id])
+  Unit                   Unit          @relation(fields: [unitId], references: [id])
 
-  unit        Unit        @relation(fields: [unitId], references: [id])
-  feeSchedule FeeSchedule @relation(fields: [feeScheduleId], references: [id])
-
-  @@index([unitId])
-  @@index([status])
   @@index([phonePeTxnId])
-}
-
-model Expense {
-  id          String          @id @default(cuid())
-  amount      Float
-  category    ExpenseCategory
-  vendor      String?
-  description String
-  receiptUrl  String?
-  expenseDate DateTime
-  addedById   String
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-
-  addedBy User @relation(fields: [addedById], references: [id])
-
-  @@index([category])
-  @@index([expenseDate])
-}
-
-model Issue {
-  id          String        @id @default(cuid())
-  unitId      String
-  raisedById  String
-  title       String
-  description String
-  category    IssueCategory
-  priority    IssuePriority @default(MEDIUM)
-  status      IssueStatus   @default(OPEN)
-  assignedTo  String?
-  photoUrls   String[]
-  resolvedAt  DateTime?
-  closedAt    DateTime?
-  isEscalated Boolean       @default(false)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-
-  unit     Unit           @relation(fields: [unitId], references: [id])
-  raisedBy User           @relation(fields: [raisedById], references: [id])
-  comments IssueComment[]
-
   @@index([status])
   @@index([unitId])
-  @@index([category])
 }
 
-model IssueComment {
-  id        String   @id @default(cuid())
-  issueId   String
-  authorId  String
-  text      String
-  createdAt DateTime @default(now())
-
-  issue  Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
-  author User  @relation(fields: [authorId], references: [id])
-
-  @@index([issueId])
+model Session {
+  id           String   @id
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  User         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-model Announcement {
-  id            String   @id @default(cuid())
-  title         String
-  body          String
-  attachmentUrl String?
-  postedById    String
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+model Unit {
+  id          String        @id
+  flatNumber  String        @unique
+  block       String?
+  floor       Int
+  areaSqft    Float?
+  ownerName   String?
+  isOccupied  Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime
+  FeeSchedule FeeSchedule[]
+  Issue       Issue[]
+  Payment     Payment[]
+  User        User[]
 
-  postedBy User @relation(fields: [postedById], references: [id])
-
-  @@index([createdAt])
+  @@index([flatNumber])
 }
 
-model Document {
-  id           String           @id @default(cuid())
-  name         String
-  url          String
-  category     DocumentCategory
-  fileSize     Int?
-  uploadedById String
-  createdAt    DateTime         @default(now())
+model User {
+  id            String         @id
+  email         String         @unique
+  name          String?
+  phone         String?
+  role          Role           @default(RESIDENT)
+  unitId        String?
+  isActive      Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime
+  image         String?
+  emailVerified DateTime?
+  Account       Account[]
+  Announcement  Announcement[]
+  AuditLog      AuditLog[]
+  Document      Document[]
+  Expense       Expense[]
+  Issue         Issue[]
+  IssueComment  IssueComment[]
+  Session       Session[]
+  Unit          Unit?          @relation(fields: [unitId], references: [id])
 
-  uploadedBy User @relation(fields: [uploadedById], references: [id])
-
-  @@index([category])
+  @@index([email])
+  @@index([unitId])
 }
 
-model AuditLog {
-  id        String   @id @default(cuid())
-  userId    String
-  action    String
-  entity    String
-  entityId  String
-  metadata  Json?
-  ipAddress String?
-  createdAt DateTime @default(now())
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
 
-  user User @relation(fields: [userId], references: [id])
+  @@unique([identifier, token])
+}
 
-  @@index([userId])
-  @@index([entity, entityId])
-  @@index([action])
-  @@index([createdAt])
+enum DocumentCategory {
+  MEETING_MINUTES
+  FINANCIAL_AUDIT
+  MAINTENANCE_CONTRACT
+  INVOICE
+  OTHER
+}
+
+enum ExpenseCategory {
+  REPAIRS
+  UTILITIES
+  SALARIES
+  CLEANING
+  SECURITY
+  AMC
+  MISCELLANEOUS
+}
+
+enum IssueCategory {
+  ELECTRICAL
+  PLUMBING
+  LIFT
+  COMMON_AREA
+  SECURITY
+  CLEANING
+  OTHER
+}
+
+enum IssuePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IssueStatus {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum Role {
+  SUPER_ADMIN
+  PRESIDENT
+  RESIDENT
 }
