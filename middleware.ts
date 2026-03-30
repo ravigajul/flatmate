@@ -14,8 +14,8 @@ export default auth((req: NextAuthRequest) => {
     return NextResponse.next()
   }
 
-  // Webhook — verified by signature, no session needed
-  if (pathname === '/api/webhooks/phonepe') {
+  // Public API routes
+  if (pathname === '/api/webhooks/phonepe' || pathname === '/api/health') {
     return NextResponse.next()
   }
 
