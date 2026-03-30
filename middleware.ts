@@ -15,7 +15,7 @@ export default auth((req: NextAuthRequest) => {
   }
 
   // Public API routes
-  if (pathname === '/api/webhooks/phonepe' || pathname === '/api/health') {
+  if (pathname === '/api/webhooks/phonepe' || pathname === '/api/health' || pathname === '/api/debug-env') {
     return NextResponse.next()
   }
 
