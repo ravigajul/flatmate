@@ -8,7 +8,7 @@ datasource db {
 }
 
 model Account {
-  id                String  @id
+  id                String  @id @default(cuid())
   userId            String
   type              String
   provider          String
@@ -20,26 +20,26 @@ model Account {
   scope             String?
   id_token          String?
   session_state     String?
-  User              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
 }
 
 model Announcement {
-  id            String   @id
+  id            String   @id @default(cuid())
   title         String
   body          String
   attachmentUrl String?
   postedById    String
   createdAt     DateTime @default(now())
-  updatedAt     DateTime
-  User          User     @relation(fields: [postedById], references: [id])
+  updatedAt     DateTime @updatedAt
+  postedBy      User     @relation(fields: [postedById], references: [id])
 
   @@index([createdAt])
 }
 
 model AuditLog {
-  id        String   @id
+  id        String   @id @default(cuid())
   userId    String
   action    String
   entity    String
@@ -47,7 +47,7 @@ model AuditLog {
   metadata  Json?
   ipAddress String?
   createdAt DateTime @default(now())
-  User      User     @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
 
   @@index([action])
   @@index([createdAt])
@@ -56,20 +56,20 @@ model AuditLog {
 }
 
 model Document {
-  id           String           @id
+  id           String           @id @default(cuid())
   name         String
   url          String
   category     DocumentCategory
   fileSize     Int?
   uploadedById String
   createdAt    DateTime         @default(now())
-  User         User             @relation(fields: [uploadedById], references: [id])
+  uploadedBy   User             @relation(fields: [uploadedById], references: [id])
 
   @@index([category])
 }
 
 model Expense {
-  id          String          @id
+  id          String          @id @default(cuid())
   amount      Float
   category    ExpenseCategory
   vendor      String?
@@ -78,31 +78,31 @@ model Expense {
   expenseDate DateTime
   addedById   String
   createdAt   DateTime        @default(now())
-  updatedAt   DateTime
-  User        User            @relation(fields: [addedById], references: [id])
+  updatedAt   DateTime        @updatedAt
+  addedBy     User            @relation(fields: [addedById], references: [id])
 
   @@index([category])
   @@index([expenseDate])
 }
 
 model FeeSchedule {
-  id        String    @id
+  id        String    @id @default(cuid())
   unitId    String
   amount    Float
   lateFee   Float     @default(0)
   monthYear String
   dueDate   DateTime
   createdAt DateTime  @default(now())
-  updatedAt DateTime
-  Unit      Unit      @relation(fields: [unitId], references: [id])
-  Payment   Payment[]
+  updatedAt DateTime  @updatedAt
+  unit      Unit      @relation(fields: [unitId], references: [id])
+  payments  Payment[]
 
   @@unique([unitId, monthYear])
   @@index([monthYear])
 }
 
 model Issue {
-  id           String         @id
+  id           String         @id @default(cuid())
   unitId       String
   raisedById   String
   title        String
@@ -116,10 +116,10 @@ model Issue {
   closedAt     DateTime?
   isEscalated  Boolean        @default(false)
   createdAt    DateTime       @default(now())
-  updatedAt    DateTime
-  User         User           @relation(fields: [raisedById], references: [id])
-  Unit         Unit           @relation(fields: [unitId], references: [id])
-  IssueComment IssueComment[]
+  updatedAt    DateTime       @updatedAt
+  raisedBy     User           @relation(fields: [raisedById], references: [id])
+  unit         Unit           @relation(fields: [unitId], references: [id])
+  comments     IssueComment[]
 
   @@index([category])
   @@index([status])
@@ -127,19 +127,19 @@ model Issue {
 }
 
 model IssueComment {
-  id        String   @id
+  id        String   @id @default(cuid())
   issueId   String
   authorId  String
   text      String
   createdAt DateTime @default(now())
-  User      User     @relation(fields: [authorId], references: [id])
-  Issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id])
+  issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
 
   @@index([issueId])
 }
 
 model Payment {
-  id                     String        @id
+  id                     String        @id @default(cuid())
   unitId                 String
   feeScheduleId          String
   amount                 Float
@@ -152,9 +152,9 @@ model Payment {
   failureReason          String?
   receiptUrl             String?
   createdAt              DateTime      @default(now())
-  updatedAt              DateTime
-  FeeSchedule            FeeSchedule   @relation(fields: [feeScheduleId], references: [id])
-  Unit                   Unit          @relation(fields: [unitId], references: [id])
+  updatedAt              DateTime      @updatedAt
+  feeSchedule            FeeSchedule   @relation(fields: [feeScheduleId], references: [id])
+  unit                   Unit          @relation(fields: [unitId], references: [id])
 
   @@index([phonePeTxnId])
   @@index([status])
@@ -162,33 +162,33 @@ model Payment {
 }
 
 model Session {
-  id           String   @id
+  id           String   @id @default(cuid())
   sessionToken String   @unique
   userId       String
   expires      DateTime
-  User         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Unit {
-  id          String        @id
-  flatNumber  String        @unique
-  block       String?
-  floor       Int
-  areaSqft    Float?
-  ownerName   String?
-  isOccupied  Boolean       @default(true)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime
-  FeeSchedule FeeSchedule[]
-  Issue       Issue[]
-  Payment     Payment[]
-  User        User[]
+  id           String        @id @default(cuid())
+  flatNumber   String        @unique
+  block        String?
+  floor        Int
+  areaSqft     Float?
+  ownerName    String?
+  isOccupied   Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  feeSchedules FeeSchedule[]
+  issues       Issue[]
+  payments     Payment[]
+  residents    User[]
 
   @@index([flatNumber])
 }
 
 model User {
-  id            String         @id
+  id            String         @id @default(cuid())
   email         String         @unique
   name          String?
   phone         String?
@@ -196,18 +196,18 @@ model User {
   unitId        String?
   isActive      Boolean        @default(false)
   createdAt     DateTime       @default(now())
-  updatedAt     DateTime
+  updatedAt     DateTime       @updatedAt
   image         String?
   emailVerified DateTime?
-  Account       Account[]
-  Announcement  Announcement[]
-  AuditLog      AuditLog[]
-  Document      Document[]
-  Expense       Expense[]
-  Issue         Issue[]
-  IssueComment  IssueComment[]
-  Session       Session[]
-  Unit          Unit?          @relation(fields: [unitId], references: [id])
+  accounts      Account[]
+  announcements Announcement[]
+  auditLogs     AuditLog[]
+  documents     Document[]
+  expenses      Expense[]
+  issues        Issue[]
+  issueComments IssueComment[]
+  sessions      Session[]
+  unit          Unit?          @relation(fields: [unitId], references: [id])
 
   @@index([email])
   @@index([unitId])
