@@ -14,7 +14,7 @@ while IFS= read -r line; do
   VALUE="${VALUE%\"}"
 
   echo "Adding $KEY..."
-  echo "$VALUE" | npx vercel env add "$KEY" production --force
+  printf '%s' "$VALUE" | npx vercel env add "$KEY" production --force
 done < "$ENV_FILE"
 
 echo "Done! Run: npx vercel --prod"
