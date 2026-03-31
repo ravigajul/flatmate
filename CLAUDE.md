@@ -53,6 +53,15 @@ npx prisma db push   # Push schema to DB without migration (dev only)
 | `PRESIDENT` | Fee management, expenses, issue assignment, reports, announcements |
 | `RESIDENT` | Pay fees, raise issues, view own data, public reports, announcements |
 
+## Deployment
+
+- **Production URL**: https://flatmate-blush.vercel.app
+- **`/api/health`** — public endpoint that calls `prisma.unit.count()`; keeps Supabase free tier alive
+- **GitHub Actions** (`.github/workflows/keep-supabase-alive.yml`) — pings `/api/health` every 3 days via cron; requires `APP_URL` secret set to the Vercel URL
+- **Google OAuth** redirect URI registered: `https://flatmate-blush.vercel.app/api/auth/callback/google`
+- To redeploy: `npx vercel --prod`
+- To re-push env vars: `bash scripts/push-env-to-vercel.sh` (then manually override the 4 URL-based vars)
+
 ## Key Conventions
 
 - All API routes validate session role via `getServerSession()` before any DB operation
