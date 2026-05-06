@@ -10,11 +10,51 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping health endpoint
+        id: health
         run: |
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.APP_URL }}/api/health")
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
           echo "Response status: $STATUS"
           if [ "$STATUS" != "200" ]; then
             echo "Health check failed with status $STATUS"
             exit 1
           fi
           echo "Supabase is alive!"
+
+      - name: Email on success
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "✅ FlatMate health check passed"
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          from: FlatMate Monitor <${{ secrets.GMAIL_USER }}>
+          body: |
+            Supabase is alive and the health check passed.
+
+            Status: ${{ steps.health.outputs.status }}
+            Time: ${{ github.event.repository.updated_at }}
+            Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Email on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "❌ FlatMate health check FAILED — Supabase may be paused"
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          from: FlatMate Monitor <${{ secrets.GMAIL_USER }}>
+          body: |
+            The health check failed. Supabase may have paused.
+
+            Status: ${{ steps.health.outputs.status }}
+            Action needed: Go to https://supabase.com/dashboard and resume the project.
+            Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
