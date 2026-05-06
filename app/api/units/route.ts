@@ -14,6 +14,9 @@ const createUnitSchema = z.object({
 export async function GET() {
   const session = await auth()
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (session.user.role !== 'PRESIDENT' && session.user.role !== 'SUPER_ADMIN') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const units = await prisma.unit.findMany({
     orderBy: { flatNumber: 'asc' },
