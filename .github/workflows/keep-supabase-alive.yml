@@ -31,7 +31,7 @@ jobs:
           username: ${{ secrets.GMAIL_USER }}
           password: ${{ secrets.GMAIL_APP_PASSWORD }}
           subject: "✅ FlatMate health check passed"
-          to: ${{ secrets.NOTIFY_EMAIL }}
+          to: ${{ secrets.GMAIL_USER }}
           from: FlatMate Monitor <${{ secrets.GMAIL_USER }}>
           body: |
             Supabase is alive and the health check passed.
@@ -50,7 +50,7 @@ jobs:
           username: ${{ secrets.GMAIL_USER }}
           password: ${{ secrets.GMAIL_APP_PASSWORD }}
           subject: "❌ FlatMate health check FAILED — Supabase may be paused"
-          to: ${{ secrets.NOTIFY_EMAIL }}
+          to: ${{ secrets.GMAIL_USER }}
           from: FlatMate Monitor <${{ secrets.GMAIL_USER }}>
           body: |
             The health check failed. Supabase may have paused.
