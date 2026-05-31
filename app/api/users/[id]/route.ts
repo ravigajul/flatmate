@@ -56,3 +56,31 @@ export async function PATCH(
 
   return NextResponse.json(updated)
 }
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth()
+  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (session.user.role !== 'SUPER_ADMIN') return NextResponse.json({ error: 'Only Super Admin can delete users' }, { status: 403 })
+
+  const { id } = await params
+  if (id === session.user.id) return NextResponse.json({ error: 'Cannot delete your own account' }, { status: 400 })
+
+  const user = await prisma.user.findUnique({ where: { id } })
+  if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+
+  await prisma.user.delete({ where: { id } })
+
+  await writeAuditLog({
+    userId: session.user.id,
+    action: 'USER_DELETED',
+    entity: 'User',
+    entityId: id,
+    metadata: { email: user.email, role: user.role },
+    ipAddress: getClientIp(request),
+  })
+
+  return NextResponse.json({ success: true })
+}

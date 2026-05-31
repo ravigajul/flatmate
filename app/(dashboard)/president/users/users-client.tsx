@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Users, CheckCircle, XCircle, Search } from 'lucide-react' // eslint-disable-line @typescript-eslint/no-unused-vars
+import { Users, CheckCircle, XCircle, Search, Trash2 } from 'lucide-react' // eslint-disable-line @typescript-eslint/no-unused-vars
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useRouter } from 'next/navigation'
@@ -38,7 +38,13 @@ const roleBadge = (role: string) => {
   return <Badge variant="muted">Resident</Badge>
 }
 
-export default function UsersClient({ users, units, currentUserId }: Props) {
+const ROLES = [
+  { value: 'RESIDENT', label: 'Resident' },
+  { value: 'PRESIDENT', label: 'President' },
+  { value: 'SUPER_ADMIN', label: 'Super Admin' },
+]
+
+export default function UsersClient({ users, units, currentUserId, isSuperAdmin }: Props) {
   const router = useRouter()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'all' | 'active' | 'pending'>('all')
@@ -65,6 +71,18 @@ export default function UsersClient({ users, units, currentUserId }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       })
+      if (!res.ok) throw new Error('Failed')
+      router.refresh()
+    } finally {
+      setLoadingId(null)
+    }
+  }
+
+  async function deleteUser(id: string, name: string | null) {
+    if (!confirm(`Delete ${name ?? 'this user'}? This cannot be undone.`)) return
+    setLoadingId(id)
+    try {
+      const res = await fetch(`/api/users/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed')
       router.refresh()
     } finally {
@@ -147,7 +165,22 @@ export default function UsersClient({ users, units, currentUserId }: Props) {
                       <span className="text-slate-300 text-xs">Not assigned</span>
                     )}
                   </td>
-                  <td className="px-6 py-4">{roleBadge(user.role)}</td>
+                  <td className="px-6 py-4">
+                    {isSuperAdmin && user.id !== currentUserId ? (
+                      <select
+                        value={user.role}
+                        disabled={loadingId === user.id}
+                        onChange={(e) => patch(user.id, { role: e.target.value })}
+                        className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white disabled:opacity-50"
+                      >
+                        {ROLES.map((r) => (
+                          <option key={r.value} value={r.value}>{r.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      roleBadge(user.role)
+                    )}
+                  </td>
                   <td className="px-6 py-4">
                     <Badge variant={user.isActive ? 'success' : 'warning'}>
                       {user.isActive ? 'Active' : 'Pending'}
@@ -170,18 +203,30 @@ export default function UsersClient({ users, units, currentUserId }: Props) {
                   </td>
                   <td className="px-6 py-4 text-right">
                     {user.id !== currentUserId && (
-                      <Button
-                        size="sm"
-                        variant={user.isActive ? 'danger' : 'primary'}
-                        loading={loadingId === user.id}
-                        onClick={() => patch(user.id, { isActive: !user.isActive })}
-                      >
-                        {user.isActive ? (
-                          <><XCircle className="w-3.5 h-3.5" />Deactivate</>
-                        ) : (
-                          <><CheckCircle className="w-3.5 h-3.5" />Activate</>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant={user.isActive ? 'danger' : 'primary'}
+                          loading={loadingId === user.id}
+                          onClick={() => patch(user.id, { isActive: !user.isActive })}
+                        >
+                          {user.isActive ? (
+                            <><XCircle className="w-3.5 h-3.5" />Deactivate</>
+                          ) : (
+                            <><CheckCircle className="w-3.5 h-3.5" />Activate</>
+                          )}
+                        </Button>
+                        {isSuperAdmin && (
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            loading={loadingId === user.id}
+                            onClick={() => deleteUser(user.id, user.name)}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
                         )}
-                      </Button>
+                      </div>
                     )}
                   </td>
                 </tr>
