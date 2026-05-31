@@ -71,7 +71,30 @@ export async function DELETE(
   const user = await prisma.user.findUnique({ where: { id } })
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
-  await prisma.user.delete({ where: { id } })
+  // Block deletion if the user has business records that must be preserved
+  const [issueCount, announcementCount, expenseCount, documentCount] = await Promise.all([
+    prisma.issue.count({ where: { raisedById: id } }),
+    prisma.announcement.count({ where: { postedById: id } }),
+    prisma.expense.count({ where: { addedById: id } }),
+    prisma.document.count({ where: { uploadedById: id } }),
+  ])
+
+  const total = issueCount + announcementCount + expenseCount + documentCount
+  if (total > 0) {
+    return NextResponse.json(
+      {
+        error: 'Cannot delete user with existing records. Deactivate them instead.',
+        details: { issues: issueCount, announcements: announcementCount, expenses: expenseCount, documents: documentCount },
+      },
+      { status: 409 }
+    )
+  }
+
+  // Safe to delete — clean up audit logs first (FK constraint), then the user
+  await prisma.$transaction([
+    prisma.auditLog.deleteMany({ where: { userId: id } }),
+    prisma.user.delete({ where: { id } }),
+  ])
 
   await writeAuditLog({
     userId: session.user.id,

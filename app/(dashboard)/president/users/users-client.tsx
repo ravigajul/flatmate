@@ -83,7 +83,11 @@ export default function UsersClient({ users, units, currentUserId, isSuperAdmin 
     setLoadingId(id)
     try {
       const res = await fetch(`/api/users/${id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error('Failed')
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error ?? 'Failed to delete user')
+        return
+      }
       router.refresh()
     } finally {
       setLoadingId(null)
