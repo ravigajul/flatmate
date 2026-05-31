@@ -82,14 +82,13 @@ describe('GET /api/expenses', () => {
     expect(json[0].id).toBe('exp-1')
   })
 
-  it('RESIDENT can also GET expenses', async () => {
+  it('RESIDENT cannot GET expenses (president-only)', async () => {
     mockAuth.mockResolvedValue({
       user: { id: 'u2', role: 'RESIDENT', unitId: 'unit-1' },
     } as ReturnType<typeof auth> extends Promise<infer T> ? T : never)
-    mockFindMany.mockResolvedValue([sampleExpense] as never)
 
     const res = await GET(makeGetRequest())
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(403)
   })
 
   it('applies category filter when ?category= is provided', async () => {

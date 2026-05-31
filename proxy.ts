@@ -37,7 +37,7 @@ export default auth(async (req: NextAuthRequest) => {
   }
 
   // C1: rate-limit payment initiations (5 per 10 min per user)
-  if (pathname === '/api/payments/initiate' && req.method === 'POST') {
+  if (pathname === '/api/payments/initiate' && req.method === 'POST' && paymentRatelimit) {
     const { success } = await paymentRatelimit.limit(id)
     if (!success) {
       return NextResponse.json({ error: 'Too many payment attempts. Try again later.' }, { status: 429 })
@@ -45,7 +45,7 @@ export default auth(async (req: NextAuthRequest) => {
   }
 
   // C1: rate-limit issue creation (10 per hour per user)
-  if (pathname === '/api/issues' && req.method === 'POST') {
+  if (pathname === '/api/issues' && req.method === 'POST' && issueRatelimit) {
     const { success } = await issueRatelimit.limit(id)
     if (!success) {
       return NextResponse.json({ error: 'Too many issue submissions. Try again later.' }, { status: 429 })

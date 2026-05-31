@@ -66,13 +66,12 @@ describe('GET /api/units', () => {
     )
   })
 
-  it('returns units array when authenticated as RESIDENT', async () => {
+  it('RESIDENT cannot GET units (president-only)', async () => {
     mockAuth.mockResolvedValue({
       user: { id: 'u2', role: 'RESIDENT', unitId: 'unit-1' },
     } as ReturnType<typeof auth> extends Promise<infer T> ? T : never)
-    mockFindMany.mockResolvedValue([] as never)
     const res = await GET()
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(403)
   })
 })
 
