@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit*)",
+            "command": "cd /Users/ravigajul/Documents/ApartmentMaintainence && echo '--- Running tests before commit ---' && npm test 2>&1 | tail -5 && echo '--- Running build before commit ---' && npm run build 2>&1 | tail -5",
+            "timeout": 120,
+            "statusMessage": "Running tests and build before commit..."
+          },
+          {
+            "type": "command",
+            "if": "Bash(git push*)",
+            "command": "cd /Users/ravigajul/Documents/ApartmentMaintainence && echo '--- Running tests before push ---' && npm test 2>&1 | tail -5 && echo '--- Running build before push ---' && npm run build 2>&1 | tail -5",
+            "timeout": 120,
+            "statusMessage": "Running tests and build before push..."
+          },
+          {
+            "type": "command",
+            "if": "Bash(vercel*--prod*)",
+            "command": "cd /Users/ravigajul/Documents/ApartmentMaintainence && echo '--- Running tests before deploy ---' && npm test 2>&1 | tail -5 && echo '--- Running build before deploy ---' && npm run build 2>&1 | tail -5",
+            "timeout": 120,
+            "statusMessage": "Running tests and build before deploying..."
+          }
+        ]
+      }
+    ]
+  }
+}
